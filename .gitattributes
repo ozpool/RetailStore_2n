@@ -1,0 +1,38 @@
+# Line endings are LF in the repository, and LF in the working tree.
+#
+# WHY THIS FILE EXISTS
+# Without it, a checkout on Windows — or an edit from a Windows editor against
+# a shared volume — rewrites files as CRLF. Git then reports every line of
+# every touched file as changed. It happened here: fourteen files, 4,982
+# insertions and 4,982 deletions, and not one character of real difference.
+# A diff that size does not get read, which is precisely how a genuine change
+# rides into a commit unnoticed.
+#
+# `eol=lf` is deliberate rather than `eol=native`. The scripts in this repo run
+# in Linux containers, and a CRLF shebang line fails with a message that names
+# the interpreter rather than the line ending, which is a bad afternoon.
+
+# Detect text automatically, normalise to LF in the index, check out LF.
+* text=auto eol=lf
+
+# Shell scripts and SQL are executed by tools that will not tolerate CR.
+*.sh   text eol=lf
+*.sql  text eol=lf
+
+# Explicit rather than inferred, so `text=auto`'s heuristic is never consulted.
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.css   text eol=lf
+*.svg   text eol=lf
+*.toml  text eol=lf
+*.prisma text eol=lf
+Dockerfile text eol=lf
+
+# Lockfiles are generated. Collapsing them in review keeps a dependency bump
+# from burying the change that prompted it.
+package-lock.json -diff linguist-generated

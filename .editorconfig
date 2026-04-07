@@ -1,0 +1,31 @@
+# Editor defaults, written to match the code as it already is rather than to
+# change it. .gitattributes enforces LF in the repository; this keeps editors
+# from producing anything else in the working tree.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Two trailing spaces are a hard line break in Markdown.
+[*.md]
+trim_trailing_whitespace = false
+
+# Prisma generates migrations with four-space indentation. They are applied by
+# checksum, so an editor must never reformat one.
+[backend/prisma/migrations/**.sql]
+indent_size = 4
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# Generated; npm owns the formatting.
+[package-lock.json]
+insert_final_newline = unset
+
+# A single self-contained page saved without a trailing newline.
+[docs/architecture-reference.html]
+insert_final_newline = unset

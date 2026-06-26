@@ -1,0 +1,1895 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>How it works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  /* ---------------------------------------------------------------
+     Tokens. Every colour is declared here, in the bare :root, so the
+     un-stamped "system" state always resolves. The dark blocks below
+     redefine only these values.
+     --------------------------------------------------------------- */
+  :root {
+    --paper:      #EDF0F3;
+    --surface:    #FFFFFF;
+    --sunk:       #E1E7EC;
+    --panel:      #101821;
+    --panel-ink:  #DFE7EE;
+    --panel-mute: #8695A2;
+    --panel-rule: #26313C;
+
+    --ink:        #141C24;
+    --ink-soft:   #4F5E6D;
+    --ink-mute:   #7C8996;
+
+    --rule:       #CCD5DE;
+    --rule-firm:  #AFBCC7;
+
+    --gold:       #A97B22;
+    --gold-ink:   #7A5713;
+    --gold-wash:  rgba(169, 123, 34, 0.11);
+
+    --moss:       #2E6A4E;
+    --clay:       #A03A2C;
+
+    --f-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --f-body:    "Source Serif 4", Georgia, "Times New Roman", serif;
+    --f-mono:    "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0C1218;
+      --surface:    #141C25;
+      --sunk:       #090E13;
+      --panel:      #060A0E;
+      --panel-ink:  #DFE7EE;
+      --panel-mute: #7C8A96;
+      --panel-rule: #1D262F;
+
+      --ink:        #E5ECF2;
+      --ink-soft:   #A0AEBA;
+      --ink-mute:   #75838F;
+
+      --rule:       #212B35;
+      --rule-firm:  #303C47;
+
+      --gold:       #D5A649;
+      --gold-ink:   #E0B663;
+      --gold-wash:  rgba(213, 166, 73, 0.13);
+
+      --moss:       #6BB891;
+      --clay:       #DF7F6E;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0C1218;
+    --surface:    #141C25;
+    --sunk:       #090E13;
+    --panel:      #060A0E;
+    --panel-ink:  #DFE7EE;
+    --panel-mute: #7C8A96;
+    --panel-rule: #1D262F;
+
+    --ink:        #E5ECF2;
+    --ink-soft:   #A0AEBA;
+    --ink-mute:   #75838F;
+
+    --rule:       #212B35;
+    --rule-firm:  #303C47;
+
+    --gold:       #D5A649;
+    --gold-ink:   #E0B663;
+    --gold-wash:  rgba(213, 166, 73, 0.13);
+
+    --moss:       #6BB891;
+    --clay:       #DF7F6E;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.66;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Reading spine, and the wider track the plates break out to. */
+  .spine { width: min(100% - 2.5rem, 66ch); margin-inline: auto; }
+  .wide  { width: min(100% - 2rem, 1080px); margin-inline: auto; }
+
+  /* ---------- masthead ---------- */
+
+  header.mast {
+    border-bottom: 1px solid var(--rule-firm);
+    padding: clamp(2.75rem, 7vw, 4.75rem) 0 clamp(1.75rem, 4vw, 2.5rem);
+  }
+  .kanji {
+    font-family: var(--f-body);
+    font-size: clamp(1.9rem, 5.5vw, 2.5rem);
+    line-height: 1;
+    color: var(--gold);
+    letter-spacing: 0.1em;
+    margin: 0 0 1.1rem;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(2.05rem, 6vw, 3.3rem);
+    line-height: 1.04;
+    letter-spacing: -0.021em;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  .standfirst {
+    font-size: clamp(1.04rem, 2.2vw, 1.19rem);
+    color: var(--ink-soft);
+    max-width: 54ch;
+    margin: 0 0 1.9rem;
+  }
+  .stamp {
+    display: flex; flex-wrap: wrap; gap: 0.45rem 1.5rem;
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+  }
+  .stamp b { color: var(--gold-ink); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+
+  section { padding: clamp(2.5rem, 5.5vw, 3.9rem) 0; }
+  section + section { border-top: 1px solid var(--rule); }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 0.685rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--gold-ink);
+    margin: 0 0 0.75rem;
+  }
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(1.5rem, 3.6vw, 2.05rem);
+    line-height: 1.16;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 1.15rem;
+  }
+  h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.09rem;
+    letter-spacing: -0.004em;
+    line-height: 1.3;
+    margin: 2.1rem 0 0.65rem;
+    text-wrap: balance;
+  }
+  p { margin: 0 0 1.05rem; }
+  p:last-child { margin-bottom: 0; }
+  strong { font-weight: 600; }
+
+  a { color: var(--gold-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 2px; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: 0.83em;
+    background: var(--gold-wash);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+  }
+
+  ul { margin: 0 0 1.05rem; padding-left: 1.1rem; }
+  li { margin-bottom: 0.48rem; }
+  li::marker { color: var(--gold); }
+
+  .lede {
+    font-family: var(--f-display);
+    font-weight: 500;
+    font-size: 1.16rem;
+    line-height: 1.42;
+    letter-spacing: -0.008em;
+    color: var(--ink);
+    margin: 0 0 1.05rem;
+  }
+
+  /* ---------- plates (the diagram figures) ---------- */
+
+  figure.plate {
+    margin: 2rem 0 0;
+    background: var(--panel);
+    border-radius: 3px;
+    padding: clamp(1.2rem, 3vw, 2rem) 0 clamp(0.9rem, 2vw, 1.3rem);
+  }
+  .plate-inner { width: min(100% - 2rem, 960px); margin-inline: auto; }
+  .plate-no {
+    font-family: var(--f-mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 0 0 0.3rem;
+  }
+  .plate-title {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--panel-ink);
+    margin: 0 0 1.15rem;
+  }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .scroll svg { display: block; width: 100%; height: auto; }
+  figure.plate figcaption {
+    font-family: var(--f-mono);
+    font-size: 0.715rem;
+    line-height: 1.62;
+    color: var(--panel-mute);
+    margin-top: 1.1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--panel-rule);
+  }
+  figure.plate figcaption b { color: var(--gold); font-weight: 500; }
+
+  /* Diagrams inherit the panel foreground via currentColor. */
+  .draw { color: var(--panel-ink); }
+  .draw svg { min-width: 660px; }
+
+  /* ---------- charts (on paper, not on the panel) ---------- */
+
+  figure.chart {
+    margin: 1.9rem 0 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: clamp(1.1rem, 2.5vw, 1.6rem);
+  }
+  figure.chart .c-title {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 0.2rem;
+  }
+  figure.chart .c-sub {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 1.15rem;
+  }
+  figure.chart figcaption {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--rule);
+  }
+  .chartwrap { overflow-x: auto; }
+  .chartwrap svg { display: block; width: 100%; height: auto; min-width: 480px; }
+
+  /* ---------- tables ---------- */
+
+  .tablewrap { margin: 1.6rem 0 0; overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--f-body);
+    font-size: 0.93rem;
+    font-variant-numeric: tabular-nums;
+  }
+  caption {
+    text-align: left;
+    font-family: var(--f-mono);
+    font-size: 0.685rem;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding-bottom: 0.7rem;
+  }
+  th {
+    text-align: left;
+    font-family: var(--f-mono);
+    font-weight: 600;
+    font-size: 0.685rem;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    padding: 0 0.85rem 0.55rem 0;
+    border-bottom: 1px solid var(--rule-firm);
+    white-space: nowrap;
+  }
+  td {
+    padding: 0.6rem 0.85rem 0.6rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.mono, th.mono { font-family: var(--f-mono); font-size: 0.83rem; }
+  td.num, th.num { text-align: right; padding-right: 1.3rem; font-family: var(--f-mono); }
+
+  /* ---------- the seam callout: the one place gold carries meaning ---------- */
+
+  .seam {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--gold);
+    padding: clamp(1.05rem, 2.4vw, 1.5rem);
+    margin: 1.7rem 0 0;
+  }
+  .seam p:last-child { margin-bottom: 0; }
+  .seam .seam-label {
+    font-family: var(--f-mono);
+    font-size: 0.665rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--gold-ink);
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+
+  /* ---------- honest-gap callout ---------- */
+
+  .gap {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--clay);
+    padding: clamp(1.05rem, 2.4vw, 1.5rem);
+    margin: 1.7rem 0 0;
+  }
+  .gap p:last-child { margin-bottom: 0; }
+  .gap .gap-label {
+    font-family: var(--f-mono);
+    font-size: 0.665rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--clay);
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+
+  /* ---------- measured-figure row ---------- */
+
+  .figures {
+    display: grid;
+    gap: 1px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    margin: 1.8rem 0 0;
+    overflow: hidden;
+  }
+  .fig { background: var(--surface); padding: 1.05rem 1.15rem; }
+  .fig .v {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 1.55rem;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    display: block;
+  }
+  .fig .k {
+    font-family: var(--f-mono);
+    font-size: 0.665rem;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    display: block;
+    margin-top: 0.4rem;
+  }
+
+  /* ---------- decision index ---------- */
+
+  .adrs {
+    display: grid;
+    gap: 0.1rem 1.6rem;
+    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    margin-top: 1.5rem;
+  }
+  .adr {
+    display: grid;
+    grid-template-columns: 2.6rem 1fr;
+    gap: 0 0.5rem;
+    padding: 0.42rem 0;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.88rem;
+    line-height: 1.44;
+  }
+  .adr .n {
+    font-family: var(--f-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--gold-ink);
+    padding-top: 0.16rem;
+  }
+
+  /* ---------- glossary ---------- */
+
+  .terms { margin-top: 1.4rem; }
+  .term {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .term:last-child { border-bottom: none; }
+  .term dt {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 0.97rem;
+    margin-bottom: 0.18rem;
+  }
+  .term dd { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+
+  footer {
+    border-top: 1px solid var(--rule-firm);
+    padding: 2.2rem 0 4rem;
+    font-family: var(--f-mono);
+    font-size: 0.715rem;
+    line-height: 1.85;
+    letter-spacing: 0.045em;
+    color: var(--ink-mute);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  /* ---------------------------------------------------------------
+     Print. The screen document sits on a tinted ground, which is
+     right on a screen and wrong on paper: with printBackground on it
+     paints a grey block inside the page margins and reads as a
+     rendering fault rather than a design. So paper goes white and
+     the plates keep their own dark ground, which is what makes the
+     diagrams legible.
+
+     The break rules matter more than the colours. A figure split
+     across a page boundary loses the one thing it exists for — the
+     caption sitting under the drawing it explains.
+     --------------------------------------------------------------- */
+  @media print {
+    :root {
+      --paper: #FFFFFF;
+      --surface: #FFFFFF;
+      --sunk: #F2F5F7;
+    }
+    body { background: #FFFFFF; font-size: 10.5pt; }
+
+    /* Never orphan a heading from what it introduces. */
+    h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
+
+    /* Keep a figure, its caption and a table whole. */
+    figure.plate, figure.chart, .tablewrap, .seam, .gap, .figures {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    figure.plate { border: 1px solid var(--rule); }
+
+    /* A section per page start reads as chapters; a section that only
+       just fits does not need one, so this is `auto` rather than
+       `always` — forcing breaks left half-empty pages throughout. */
+    section { break-before: auto; padding: 1.4rem 0; }
+
+    /* Diagrams are sized for a scrolling column; on A4 the min-width
+       forces a horizontal overflow that clips. */
+    .draw svg, .chartwrap svg { min-width: 0; }
+    .scroll, .chartwrap, .tablewrap { overflow: visible; }
+
+    /* Links are dead on paper: keep the colour for emphasis, drop the
+       underline noise. */
+    a { text-decoration: none; }
+
+    footer { break-before: avoid; }
+  }
+</style>
+
+<header class="mast">
+  <div class="spine">
+    <div class="kanji">RetailStore_2n</div>
+    <h1>How it works</h1>
+    <p class="standfirst">
+      A secondhand marketplace, explained from the browser down to the database —
+      what each piece does, why it was built that way, and which numbers were
+      measured rather than claimed.
+    </p>
+    <div class="stamp">
+      <span>Architecture reference</span>
+      <span>32 decision records</span>
+      <span>35 test suites</span>
+      <span><b>1,263 assertions passing</b></span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">The idea</p>
+    <h2>A marketplace where the damage is part of the description</h2>
+
+    <p class="lede">
+      RetailStore_2n is a marketplace for things that have already had one life,
+      where an item's wear and repairs are part of its story, not something to hide.
+    </p>
+
+    <p>
+      The site sells secondhand furniture, clothing and objects, and it takes that
+      idea literally: <strong>condition is disclosed, not glossed over.</strong>
+      A chair with a repaired leg says so. Almost every item is one of a kind —
+      one chair, one jacket, one mended plate — and that single fact shapes more
+      of the engineering than anything else on this page.
+    </p>
+
+    <p>
+      Because if there is only one chair, the hard problem is not counting stock.
+      It is making absolutely certain that two people who click "buy" at the same
+      instant cannot both get it. That constraint comes back again and again
+      below, in slightly different clothes: two buyers and one chair, two refunds
+      and one order, two workers and one notification.
+    </p>
+
+    <h3>What you can actually do on it</h3>
+    <p>
+      Browse and search a catalogue, save things to a wishlist, buy with a card,
+      get refunded when a seller can't send an item, leave a review if you
+      actually bought the thing. As a seller: list items with photos, verify your
+      identity, mark orders shipped. As a moderator: see everything, remove
+      listings, suspend accounts, and answer "did that customer get their email?"
+    </p>
+    <p>
+      Money now completes its whole circuit. A buyer pays the platform; the
+      platform pays the seller once the item has been delivered and a return
+      window has closed; and a buyer who receives something broken can
+      <strong>ask for their money back</strong> from the order itself, which the
+      seller answers and a moderator settles if they disagree.
+    </p>
+    <p>
+      That last sentence was the largest gap in this document for most of the
+      project's life, and it is worth saying why it took so long. The refund
+      machinery existed early — per-line, guarded against over-refunding,
+      settled by webhook. What was missing was never the plumbing. It was
+      deciding <em>who is allowed to say yes</em>, which is a product question
+      wearing an engineering costume.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">The shape</p>
+    <h2>Six moving parts, and only one of them is allowed to say no</h2>
+
+    <p>
+      There are two Node programs, not one, and the split is the most important
+      structural decision in the system. The browser never talks to the API
+      directly. It talks to the Next.js server, which forwards the request
+      onward without interpreting it.
+    </p>
+    <p>
+      That forwarding server is called a <strong>BFF</strong> — a backend for the
+      frontend. It holds no business rules at all. Every rule lives in the
+      Express API, which means someone who bypasses the website entirely and
+      pokes the API with a script gains nothing: the same checks run either way.
+      A greyed-out button is a courtesy; the server re-checks.
+    </p>
+  </div>
+
+  <div class="wide">
+    <figure class="plate">
+      <div class="plate-inner">
+        <p class="plate-no">Plate 01</p>
+        <p class="plate-title">What runs, and what each part is trusted with</p>
+        <div class="scroll draw">
+          <svg viewBox="0 0 900 430" role="img" aria-label="Diagram: the browser sends requests to the Next.js server, which relays them with cookies to the Express API. Express is the only component that enforces rules, and it reads and writes PostgreSQL, Redis, object storage and Kafka. PostgreSQL is the single source of truth; Redis and Kafka hold nothing that must survive a restart.">
+            <defs>
+              <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#D5A649"></path>
+              </marker>
+            </defs>
+
+            <!-- zone: untrusted -->
+            <rect x="18" y="20" width="252" height="86" rx="3" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"></rect>
+            <text x="30" y="40" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="currentColor" opacity="0.6">UNTRUSTED</text>
+            <rect x="40" y="52" width="208" height="38" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"></rect>
+            <text x="144" y="76" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Browser</text>
+
+            <!-- zone: edge -->
+            <rect x="324" y="20" width="252" height="86" rx="3" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"></rect>
+            <text x="336" y="40" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="currentColor" opacity="0.6">NO RULES HERE</text>
+            <rect x="346" y="52" width="208" height="38" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"></rect>
+            <text x="450" y="70" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Next.js</text>
+            <text x="450" y="84" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">renders + forwards</text>
+
+            <!-- zone: trusted -->
+            <rect x="630" y="20" width="252" height="86" rx="3" fill="none" stroke="#D5A649" stroke-width="1.25"></rect>
+            <text x="642" y="40" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="#D5A649">EVERY RULE</text>
+            <rect x="652" y="52" width="208" height="38" rx="2" fill="none" stroke="#D5A649" stroke-width="1.5"></rect>
+            <text x="756" y="70" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="#D5A649">Express API</text>
+            <text x="756" y="84" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="#D5A649" opacity="0.85">the only gatekeeper</text>
+
+            <line x1="248" y1="71" x2="340" y2="71" stroke="currentColor" stroke-width="1.2" marker-end="url(#a1)"></line>
+            <text x="294" y="63" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">cookies</text>
+
+            <line x1="554" y1="71" x2="646" y2="71" stroke="currentColor" stroke-width="1.2" marker-end="url(#a1)"></line>
+            <text x="600" y="63" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">relayed</text>
+
+            <!-- stores -->
+            <line x1="756" y1="106" x2="756" y2="150" stroke="#D5A649" stroke-width="1.4" marker-end="url(#a2)"></line>
+
+            <rect x="286" y="152" width="216" height="56" rx="2" fill="none" stroke="#D5A649" stroke-width="1.6"></rect>
+            <text x="394" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="#D5A649">PostgreSQL</text>
+            <text x="394" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="#D5A649" opacity="0.85">the single source of truth</text>
+
+            <rect x="534" y="152" width="150" height="56" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="609" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">Redis</text>
+            <text x="609" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">counters, cache</text>
+
+            <rect x="700" y="152" width="184" height="56" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="792" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">Kafka</text>
+            <text x="792" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">notifications only</text>
+
+            <rect x="96" y="152" width="164" height="56" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="178" y="174" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">Object store</text>
+            <text x="178" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">photos, avatars</text>
+
+            <path d="M700 118 L640 118 L640 146" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#a1)"></path>
+            <path d="M812 118 L812 146" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#a1)"></path>
+            <path d="M666 128 L420 128 L420 146" fill="none" stroke="#D5A649" stroke-width="1.4" marker-end="url(#a2)"></path>
+            <path d="M652 134 L196 134 L196 146" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#a1)"></path>
+
+            <!-- browser fetches images straight from the store -->
+            <path d="M144 90 L144 250 L178 250" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#a1)"></path>
+            <text x="70" y="245" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">images direct</text>
+
+            <!-- outside world -->
+            <rect x="286" y="272" width="598" height="132" rx="3" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity="0.45"></rect>
+            <text x="298" y="292" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="currentColor" opacity="0.6">OUTSIDE, BEHIND SEAMS</text>
+
+            <rect x="304" y="306" width="132" height="34" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="370" y="328" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Stripe pay</text>
+
+            <rect x="450" y="306" width="132" height="34" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="516" y="328" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Stripe ID</text>
+
+            <rect x="596" y="306" width="132" height="34" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="662" y="328" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">SMTP mail</text>
+
+            <rect x="742" y="306" width="126" height="34" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="805" y="328" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Twilio SMS</text>
+
+            <rect x="304" y="354" width="132" height="34" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="370" y="376" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Web Push</text>
+
+            <rect x="450" y="354" width="278" height="34" rx="2" fill="none" stroke="currentColor" stroke-width="1"></rect>
+            <text x="589" y="376" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Pwned Passwords (prefix only)</text>
+
+            <path d="M756 208 L756 240 L470 240 L470 300" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#a1)"></path>
+          </svg>
+        </div>
+        <figcaption>
+          Dashed boxes are zones of trust; the dashed arrow from the browser is the
+          one request that skips the API entirely — photos are fetched straight from
+          the object store. <b>Gold marks Postgres and the API</b>: the only two
+          things the system treats as authoritative. Redis and Kafka can be wiped
+          without losing an order, a notification or a penny.
+        </figcaption>
+        </div>
+      </figure>
+  </div>
+
+  <div class="spine">
+    <div class="seam">
+      <span class="seam-label">The rule this buys</span>
+      <p>
+        Redis and Kafka are allowed to lose everything they hold. Rate-limit
+        counters can evaporate; the cache can be cold; the broker can be empty.
+        None of that loses an order, a notification, or money — because the
+        record of all three lives in Postgres, and the other two are only ever
+        carrying <em>work in progress</em>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">A request</p>
+    <h2>What happens between the click and the answer</h2>
+
+    <p>
+      Signing in gives the browser two cookies, and they do very different jobs.
+      Neither can be read by JavaScript, so a script injected into the page
+      cannot steal a session.
+    </p>
+  </div>
+
+  <div class="wide">
+    <div class="tablewrap">
+      <table>
+        <caption>The two cookies</caption>
+        <thead>
+          <tr><th>Cookie</th><th>What it is</th><th class="num">Lasts</th><th>Stored in the database as</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">access</td>
+            <td>A signed token the API can verify without a database lookup</td>
+            <td class="num">15 min</td>
+            <td>Not stored at all — it is self-proving</td>
+          </tr>
+          <tr>
+            <td class="mono">refresh</td>
+            <td>A long random string, good only for getting a new access token</td>
+            <td class="num">30 days</td>
+            <td>A <strong>SHA-256 hash</strong>, never the value</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="spine">
+    <p style="margin-top:1.4rem">
+      Hashing the refresh token matters for the same reason hashing a password
+      does: if the database leaks, an attacker gets hashes, and a hash cannot be
+      presented as a cookie. That refresh token is every bit as good as a
+      password for impersonating someone, so it gets the same treatment.
+    </p>
+
+    <h3>The renewal nobody sees</h3>
+    <p>
+      Access tokens expire every fifteen minutes, which would mean being logged
+      out constantly. Instead the BFF handles it: when the API says "expired",
+      the BFF quietly renews and retries the original request. The browser only
+      ever sees the successful answer.
+    </p>
+  </div>
+
+  <div class="wide">
+    <figure class="plate">
+      <div class="plate-inner">
+        <p class="plate-no">Plate 02</p>
+        <p class="plate-title">An expired token, renewed without the user noticing</p>
+        <div class="scroll draw">
+          <svg viewBox="0 0 900 300" role="img" aria-label="Sequence diagram: the browser requests seller listings through the Next.js BFF. Express replies 401 because the access token expired. The BFF calls the refresh endpoint, receives rotated cookies, retries the original request, and returns 200 to the browser along with the new cookies.">
+            <defs>
+              <marker id="s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="s2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#D5A649"></path>
+              </marker>
+            </defs>
+
+            <text x="120" y="28" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">Browser</text>
+            <text x="450" y="28" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">Next.js BFF</text>
+            <text x="780" y="28" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">Express API</text>
+
+            <line x1="120" y1="40" x2="120" y2="276" stroke="currentColor" stroke-width="1" opacity="0.28"></line>
+            <line x1="450" y1="40" x2="450" y2="276" stroke="currentColor" stroke-width="1" opacity="0.28"></line>
+            <line x1="780" y1="40" x2="780" y2="276" stroke="currentColor" stroke-width="1" opacity="0.28"></line>
+
+            <line x1="120" y1="66" x2="444" y2="66" stroke="currentColor" stroke-width="1.2" marker-end="url(#s1)"></line>
+            <text x="282" y="58" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor">GET /api/seller/listings</text>
+
+            <line x1="450" y1="98" x2="774" y2="98" stroke="currentColor" stroke-width="1.2" marker-end="url(#s1)"></line>
+            <text x="612" y="90" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor">forwarded, cookies attached</text>
+
+            <line x1="780" y1="130" x2="456" y2="130" stroke="#D5A649" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#s2)"></line>
+            <text x="618" y="122" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="#D5A649">401 — access token expired</text>
+
+            <line x1="450" y1="164" x2="774" y2="164" stroke="#D5A649" stroke-width="1.4" marker-end="url(#s2)"></line>
+            <text x="612" y="156" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="#D5A649">POST /auth/refresh</text>
+
+            <line x1="780" y1="196" x2="456" y2="196" stroke="#D5A649" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#s2)"></line>
+            <text x="618" y="188" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="#D5A649">204 + brand-new cookies</text>
+
+            <line x1="450" y1="228" x2="774" y2="228" stroke="currentColor" stroke-width="1.2" marker-end="url(#s1)"></line>
+            <text x="612" y="220" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor">the same request, again</text>
+
+            <line x1="450" y1="262" x2="126" y2="262" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#s1)"></line>
+            <text x="288" y="254" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor">200 — the only thing the page sees</text>
+          </svg>
+        </div>
+        <figcaption>
+          Solid lines are requests, dashed are responses. <b>The gold detour is
+          invisible to the page.</b> Login, signup and refresh itself are excluded
+          from this retry — otherwise a wrong password would trigger an endless
+          renewal loop instead of an error message.
+        </figcaption>
+        </div>
+      </figure>
+  </div>
+
+  <div class="spine">
+    <h3>What happens if a refresh token is stolen</h3>
+    <p>
+      Every renewal issues a new refresh token and marks the old one used. So if
+      a token that has <em>already been used</em> shows up again, only one thing
+      can explain it: a copy is in someone else's hands. The system does not try
+      to guess whose — it kills the entire session family. The real user logs in
+      again. The thief gets nothing that lasts.
+    </p>
+  </div>
+
+  <div class="wide">
+    <figure class="plate">
+      <div class="plate-inner">
+        <p class="plate-no">Plate 03</p>
+        <p class="plate-title">Rotation, and how a stolen token gives itself away</p>
+        <div class="scroll draw">
+          <svg viewBox="0 0 900 250" role="img" aria-label="Diagram: token one is exchanged for token two, which is exchanged for token three, each marking its predecessor used. When a thief replays the already-used token one, the system detects reuse and revokes the whole family, ending the session for everyone.">
+            <defs>
+              <marker id="r1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="r2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#D5A649"></path>
+              </marker>
+            </defs>
+
+            <text x="30" y="42" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="currentColor" opacity="0.6">THE HONEST PATH</text>
+
+            <rect x="30" y="56" width="150" height="44" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"></rect>
+            <text x="105" y="76" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">token 1</text>
+            <text x="105" y="92" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">used</text>
+
+            <line x1="180" y1="78" x2="252" y2="78" stroke="currentColor" stroke-width="1.2" marker-end="url(#r1)"></line>
+
+            <rect x="258" y="56" width="150" height="44" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"></rect>
+            <text x="333" y="76" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">token 2</text>
+            <text x="333" y="92" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">used</text>
+
+            <line x1="408" y1="78" x2="480" y2="78" stroke="currentColor" stroke-width="1.2" marker-end="url(#r1)"></line>
+
+            <rect x="486" y="56" width="150" height="44" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"></rect>
+            <text x="561" y="76" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">token 3</text>
+            <text x="561" y="92" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">live</text>
+
+            <!-- the replay -->
+            <text x="30" y="150" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="#D5A649">THE REPLAY</text>
+
+            <rect x="30" y="164" width="150" height="44" rx="2" fill="none" stroke="#D5A649" stroke-width="1.5" stroke-dasharray="5 3"></rect>
+            <text x="105" y="184" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D5A649">token 1</text>
+            <text x="105" y="200" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="#D5A649" opacity="0.9">presented again</text>
+
+            <line x1="180" y1="186" x2="330" y2="186" stroke="#D5A649" stroke-width="1.5" marker-end="url(#r2)"></line>
+            <text x="255" y="178" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="#D5A649">already used</text>
+
+            <rect x="336" y="160" width="300" height="52" rx="2" fill="none" stroke="#D5A649" stroke-width="1.5"></rect>
+            <text x="486" y="181" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D5A649">the whole family is revoked</text>
+            <text x="486" y="198" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="#D5A649" opacity="0.9">tokens 1, 2 and 3 all die at once</text>
+
+            <line x1="636" y1="186" x2="712" y2="186" stroke="currentColor" stroke-width="1.2" marker-end="url(#r1)"></line>
+            <rect x="718" y="164" width="152" height="44" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"></rect>
+            <text x="794" y="184" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">log in again</text>
+            <text x="794" y="199" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.7">both parties</text>
+          </svg>
+        </div>
+        <figcaption>
+          <b>Reuse is the signal.</b> A token that works exactly once means a
+          replay cannot be mistaken for normal traffic, so no judgement call is
+          needed about whether a leak happened. The cost is real and accepted: a
+          legitimate user with a flaky connection can occasionally be logged out.
+        </figcaption>
+        </div>
+      </figure>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">The hard problem</p>
+    <h2>Two buyers, one chair</h2>
+
+    <p>
+      Here is the bug that a marketplace of unique objects must never have.
+      Checking stock and then taking it looks obviously correct and is
+      obviously wrong:
+    </p>
+    <ul>
+      <li>Two requests arrive at the same moment.</li>
+      <li>Both read the chair. Both see quantity 1.</li>
+      <li>Both decide they may proceed.</li>
+      <li>Both write quantity 0. The chair sells twice.</li>
+    </ul>
+    <p>
+      The window is tiny — a few milliseconds — which is exactly why it survives
+      testing and appears in production. The fix is to make the database itself
+      hand out the answer, one caller at a time.
+    </p>
+  </div>
+
+  <div class="wide">
+    <figure class="plate">
+      <div class="plate-inner">
+        <p class="plate-no">Plate 04</p>
+        <p class="plate-title">The same two clicks, before and after the lock</p>
+        <div class="scroll draw">
+          <svg viewBox="0 0 900 340" role="img" aria-label="Comparison diagram: without a lock, two buyers both read quantity one and both write zero, so the chair sells twice. With SELECT FOR UPDATE, the second buyer waits for the first transaction to commit, then reads quantity zero and is refused.">
+            <defs>
+              <marker id="l1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="l2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#D5A649"></path>
+              </marker>
+            </defs>
+
+            <!-- BEFORE -->
+            <text x="24" y="30" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.3" fill="currentColor" opacity="0.6">READ, THEN WRITE — BROKEN</text>
+            <line x1="24" y1="40" x2="424" y2="40" stroke="currentColor" stroke-width="1" opacity="0.3"></line>
+
+            <rect x="24" y="58" width="180" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="114" y="81" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Buyer A reads: 1</text>
+
+            <rect x="244" y="58" width="180" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="334" y="81" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Buyer B reads: 1</text>
+
+            <line x1="114" y1="94" x2="114" y2="128" stroke="currentColor" stroke-width="1.1" marker-end="url(#l1)"></line>
+            <line x1="334" y1="94" x2="334" y2="128" stroke="currentColor" stroke-width="1.1" marker-end="url(#l1)"></line>
+
+            <rect x="24" y="130" width="180" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="114" y="153" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">A writes: 0</text>
+
+            <rect x="244" y="130" width="180" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="334" y="153" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">B writes: 0</text>
+
+            <line x1="224" y1="196" x2="224" y2="196" stroke="currentColor" stroke-width="0"></line>
+            <rect x="24" y="196" width="400" height="40" rx="2" fill="none" stroke="#A03A2C" stroke-width="1.6"></rect>
+            <text x="224" y="221" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#A03A2C">one chair, sold twice</text>
+            <line x1="114" y1="166" x2="150" y2="192" stroke="currentColor" stroke-width="1.1" marker-end="url(#l1)"></line>
+            <line x1="334" y1="166" x2="298" y2="192" stroke="currentColor" stroke-width="1.1" marker-end="url(#l1)"></line>
+
+            <!-- divider -->
+            <line x1="452" y1="20" x2="452" y2="320" stroke="currentColor" stroke-width="1" stroke-dasharray="3 5" opacity="0.3"></line>
+
+            <!-- AFTER -->
+            <text x="480" y="30" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.3" fill="#D5A649">LOCK THE ROW — CORRECT</text>
+            <line x1="480" y1="40" x2="876" y2="40" stroke="#D5A649" stroke-width="1" opacity="0.5"></line>
+
+            <rect x="480" y="58" width="180" height="36" rx="2" fill="none" stroke="#D5A649" stroke-width="1.5"></rect>
+            <text x="570" y="81" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#D5A649">A locks the row</text>
+
+            <rect x="696" y="58" width="180" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-dasharray="4 3"></rect>
+            <text x="786" y="81" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">B waits</text>
+
+            <line x1="570" y1="94" x2="570" y2="128" stroke="#D5A649" stroke-width="1.5" marker-end="url(#l2)"></line>
+
+            <rect x="480" y="130" width="180" height="36" rx="2" fill="none" stroke="#D5A649" stroke-width="1.5"></rect>
+            <text x="570" y="153" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#D5A649">A takes it, commits</text>
+
+            <path d="M660 148 L678 148 L678 112 L786 112 L786 128" fill="none" stroke="currentColor" stroke-width="1.1" marker-end="url(#l1)"></path>
+            <text x="732" y="106" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.75">lock released</text>
+
+            <rect x="696" y="130" width="180" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="786" y="153" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">B reads: 0</text>
+
+            <line x1="786" y1="166" x2="786" y2="192" stroke="currentColor" stroke-width="1.1" marker-end="url(#l1)"></line>
+            <line x1="570" y1="166" x2="570" y2="192" stroke="#D5A649" stroke-width="1.5" marker-end="url(#l2)"></line>
+
+            <rect x="480" y="196" width="180" height="40" rx="2" fill="none" stroke="#2E6A4E" stroke-width="1.6"></rect>
+            <text x="570" y="221" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="#2E6A4E">A gets the chair</text>
+
+            <rect x="696" y="196" width="180" height="40" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="786" y="221" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">B told: sold</text>
+
+            <text x="480" y="272" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.75">The wait is measured in milliseconds.</text>
+            <text x="480" y="292" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.75">Nobody notices it. Everybody would</text>
+            <text x="480" y="312" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.75">notice the double sale.</text>
+          </svg>
+        </div>
+        <figcaption>
+          One figure, one claim: the only difference between the halves is who
+          decides. On the left the application decides, from a value it read a
+          moment ago. On the right <b>Postgres decides</b>, and the second caller
+          simply cannot see stale stock.
+        </figcaption>
+        </div>
+      </figure>
+  </div>
+
+  <div class="spine">
+    <h3>The same shape, five more times</h3>
+    <p>
+      Once you can see this pattern you can see it everywhere in the codebase,
+      and that repetition is deliberate — one idea learned once, applied
+      wherever it fits. The two most recent features in the system, seller
+      payouts and buyer returns, needed no new idea at all: both are the chair
+      again, in different clothes.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>One decision, made atomically, before any outside call</caption>
+        <thead>
+          <tr><th>Where</th><th>What could go wrong twice</th><th>How it is claimed</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Checkout</td>
+            <td>Two buyers get one chair</td>
+            <td class="mono">SELECT … FOR UPDATE</td>
+          </tr>
+          <tr>
+            <td>Payment</td>
+            <td>One order charged twice</td>
+            <td>Conditional <span class="mono">UPDATE</span> before calling Stripe</td>
+          </tr>
+          <tr>
+            <td>Refunds</td>
+            <td>More refunded than was paid</td>
+            <td>Refund headroom claimed the same way</td>
+          </tr>
+          <tr>
+            <td>Notifications</td>
+            <td>One event, two emails</td>
+            <td>A unique row inserted before the provider is called</td>
+          </tr>
+          <tr>
+            <td>Payouts</td>
+            <td>One sale paid to a seller twice</td>
+            <td>A unique row per order line, inserted before the transfer</td>
+          </tr>
+          <tr>
+            <td>Returns</td>
+            <td>Two requests on one item, answered separately</td>
+            <td>A unique row per order line, and the insert <em>is</em> the request</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="seam">
+      <span class="seam-label">The rule, stated once</span>
+      <p>
+        <strong>One system decides, atomically, and the outside call happens only
+        after that decision is durable.</strong> Never the other way round —
+        because if you call Stripe first and then record it, a crash in between
+        leaves money moved and no record of it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">Telling people things</p>
+    <h2>The notification pipeline, which is most of the machinery</h2>
+
+    <p>
+      Eleven things can happen that a person should hear about: an item sold, an
+      order shipped, a refund issued, an account suspended. Each one has to
+      reach the right person, on the channels they agreed to, exactly once.
+    </p>
+    <p>
+      The naive version is to save the notification and then send the email. That
+      is <strong>two writes to two systems with no transaction around them</strong>,
+      and a crash in the gap is silent: either a notification nobody was told
+      about, or an email about something that got rolled back. Nothing anywhere
+      records that the pair was supposed to be atomic.
+    </p>
+
+    <div class="seam">
+      <span class="seam-label">The seam this closes</span>
+      <p>
+        So the event is written into an <strong>outbox</strong> — an ordinary
+        table — in the very same transaction as the notification. They commit
+        together or not at all. A separate small program, the <strong>relay</strong>,
+        reads committed outbox rows and publishes them onward. A crash anywhere
+        now leaves work <em>visibly unfinished</em> rather than quietly lost.
+      </p>
+    </div>
+  </div>
+
+  <div class="wide">
+    <figure class="plate">
+      <div class="plate-inner">
+        <p class="plate-no">Plate 05</p>
+        <p class="plate-title">From one transaction to three channels, and what happens when a send fails</p>
+        <div class="scroll draw">
+          <svg viewBox="0 0 900 590" role="img" aria-label="Diagram of the notification pipeline: a notification row and an outbox row are written in one Postgres transaction. A relay claims unpublished rows with FOR UPDATE SKIP LOCKED and publishes to a Kafka topic keyed by user id with twelve partitions. Three consumer groups for email, push and SMS each claim a row in the delivery ledger before calling their provider. A transient failure is republished to delay topics of five seconds, one minute and fifteen minutes, then to a dead-letter queue. Quiet hours park an SMS on the ledger for a sweeper instead.">
+            <defs>
+              <marker id="n1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="n2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="#D5A649"></path>
+              </marker>
+            </defs>
+
+            <!-- transaction -->
+            <rect x="150" y="18" width="600" height="126" rx="3" fill="none" stroke="#D5A649" stroke-width="1.3" stroke-dasharray="5 4"></rect>
+            <text x="164" y="38" font-family="IBM Plex Mono, monospace" font-size="10.5" letter-spacing="1.2" fill="#D5A649">ONE POSTGRES TRANSACTION</text>
+
+            <rect x="170" y="58" width="176" height="44" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="258" y="85" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">"your item sold"</text>
+
+            <line x1="346" y1="70" x2="432" y2="70" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+            <line x1="346" y1="94" x2="432" y2="116" stroke="#D5A649" stroke-width="1.4" marker-end="url(#n2)"></line>
+
+            <rect x="438" y="50" width="192" height="40" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="534" y="75" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">notifications</text>
+
+            <rect x="438" y="98" width="192" height="40" rx="2" fill="none" stroke="#D5A649" stroke-width="1.6"></rect>
+            <text x="534" y="123" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="#D5A649">outbox</text>
+
+            <!-- relay -->
+            <line x1="534" y1="144" x2="534" y2="178" stroke="#D5A649" stroke-width="1.4" marker-end="url(#n2)"></line>
+            <text x="546" y="166" font-family="IBM Plex Mono, monospace" font-size="9.5" fill="currentColor" opacity="0.75">claims unpublished rows</text>
+
+            <rect x="438" y="180" width="192" height="42" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="534" y="206" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">relay</text>
+
+            <line x1="534" y1="222" x2="534" y2="250" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+
+            <!-- topic -->
+            <rect x="70" y="252" width="760" height="52" rx="2" fill="none" stroke="#D5A649" stroke-width="1.3"></rect>
+            <text x="450" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="#D5A649">Kafka topic — 12 partitions</text>
+            <text x="450" y="292" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.8">grouped by person, so your messages keep their order</text>
+
+            <!-- fan out -->
+            <line x1="200" y1="304" x2="200" y2="336" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+            <line x1="450" y1="304" x2="450" y2="336" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+            <line x1="700" y1="304" x2="700" y2="336" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+
+            <rect x="112" y="338" width="176" height="42" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="200" y="364" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">email worker</text>
+
+            <rect x="362" y="338" width="176" height="42" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="450" y="364" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">push worker</text>
+
+            <rect x="612" y="338" width="176" height="42" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"></rect>
+            <text x="700" y="364" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">SMS worker</text>
+
+            <line x1="200" y1="380" x2="200" y2="404" stroke="#D5A649" stroke-width="1.4" marker-end="url(#n2)"></line>
+            <line x1="450" y1="380" x2="450" y2="404" stroke="#D5A649" stroke-width="1.4" marker-end="url(#n2)"></line>
+            <line x1="700" y1="380" x2="700" y2="404" stroke="#D5A649" stroke-width="1.4" marker-end="url(#n2)"></line>
+
+            <!-- ledger -->
+            <rect x="70" y="406" width="760" height="50" rx="2" fill="none" stroke="#D5A649" stroke-width="1.6"></rect>
+            <text x="450" y="428" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="#D5A649">delivery ledger — one row per person per channel</text>
+            <text x="450" y="446" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.8">claimed BEFORE the provider is called, so a repeat collides and stops</text>
+
+            <line x1="200" y1="456" x2="200" y2="480" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+            <line x1="450" y1="456" x2="450" y2="480" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+            <line x1="700" y1="456" x2="700" y2="480" stroke="currentColor" stroke-width="1.1" marker-end="url(#n1)"></line>
+
+            <text x="200" y="497" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">mail server</text>
+            <text x="450" y="497" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">the browser</text>
+            <text x="700" y="497" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">Twilio</text>
+
+            <!-- retry ladder -->
+            <path d="M70 486 L34 486 L34 534 L866 534 L866 486 L830 486" fill="none" stroke="currentColor" stroke-width="1.1" stroke-dasharray="4 4"></path>
+            <text x="450" y="529" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" letter-spacing="0.4" fill="currentColor" opacity="0.85">provider having a bad minute → wait 5s → wait 1m → wait 15m → dead-letter queue</text>
+
+            <!-- quiet hours -->
+            <path d="M760 456 L760 566 L470 566" fill="none" stroke="#D5A649" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#n2)"></path>
+            <text x="466" y="570" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="#D5A649">3am? parked on the ledger, sent when the window opens</text>
+          </svg>
+        </div>
+        <figcaption>
+          <b>Gold marks every place something is claimed or made atomic</b> — the
+          shared transaction, the outbox, the topic key, the ledger. The dashed
+          loop at the bottom is the failure path: a message that keeps failing
+          waits somewhere else rather than blocking everyone behind it.
+        </figcaption>
+        </div>
+      </figure>
+  </div>
+
+  <div class="spine">
+    <h3>Why waiting happens on a separate queue</h3>
+    <p>
+      When a send fails for a reason that might fix itself — a timeout, a server
+      having a bad minute — the obvious move is to wait and try again. The
+      obvious move is wrong. A worker that sits waiting holds up every other
+      message queued behind it, so <strong>one person with a dead phone number
+      would delay everybody else's notifications.</strong>
+    </p>
+    <p>
+      Instead the message is pushed onto a separate queue with a built-in delay,
+      the worker moves on, and something else picks it up later. Three rungs —
+      five seconds, one minute, fifteen minutes — and then it lands in a
+      dead-letter queue where a human can look at it.
+    </p>
+    <p>
+      Failures that <em>cannot</em> fix themselves never enter that ladder at
+      all. A rejected address, a deleted account, or a recipient who replied
+      STOP is permanent. Retrying those is how a sender's reputation gets
+      burned, and in the case of an opt-out it is also unlawful.
+    </p>
+
+    <h3>Consent, before anything is sent</h3>
+    <p>
+      Each of the eleven events has a default for each channel, and each person
+      can override it. Two of them default to SMS — a refund, and an order that
+      cannot be sent — because in both cases money moved and the person needs to
+      know away from a screen. A review notification does not clear that bar.
+    </p>
+    <ul>
+      <li><strong>Nothing is texted to an unverified number.</strong> A six-digit
+      code, valid ten minutes, five guesses, then it is spent.</li>
+      <li><strong>A parcel's delivery phone is never reused for messaging.</strong>
+      It is often a third party — a gift, a workplace, a relative — who never
+      agreed to anything and cannot unsubscribe.</li>
+      <li><strong>Quiet hours defer rather than drop.</strong> A message caught at
+      3am is parked and sent when the window opens, once, by exactly one
+      server.</li>
+      <li>A daily cap per person, as a circuit breaker against bugs rather than
+      as a preference.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">The numbers</p>
+    <h2>Measured, including the unflattering parts</h2>
+
+    <p>
+      This project has a rule about performance: <strong>measure it, don't claim
+      it.</strong> Five scripts exist to make the claims checkable, and the
+      database-transaction counts come from Postgres's own counters rather than
+      from the application, because an application counter measures what the code
+      <em>believes</em> it did.
+    </p>
+    <p>
+      The notification pipeline was built partly to scale. So the honest question
+      is: does it? The answer is more interesting than a yes.
+    </p>
+  </div>
+
+  <div class="wide">
+    <figure class="chart">
+      <p class="c-title">Adding workers helps, then stops helping</p>
+      <p class="c-sub">10,000 notifications through the real email path · events per second</p>
+      <div class="chartwrap">
+        <svg viewBox="0 0 700 320" role="img" aria-label="Bar chart of throughput against the number of workers: one worker 109 events per second, three workers 136, six workers 174, twelve workers 189, fifteen workers 170. Throughput peaks at twelve and falls at fifteen, where only twelve of the fifteen workers were given any work.">
+          <!-- gridlines at 0, 50, 100, 150, 200 -->
+          <line x1="62" y1="240" x2="672" y2="240" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+          <line x1="62" y1="192" x2="672" y2="192" stroke="currentColor" stroke-width="1" opacity="0.13"></line>
+          <line x1="62" y1="144" x2="672" y2="144" stroke="currentColor" stroke-width="1" opacity="0.13"></line>
+          <line x1="62" y1="96" x2="672" y2="96" stroke="currentColor" stroke-width="1" opacity="0.13"></line>
+          <line x1="62" y1="48" x2="672" y2="48" stroke="currentColor" stroke-width="1" opacity="0.13"></line>
+
+          <text x="52" y="244" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.65">0</text>
+          <text x="52" y="196" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.65">50</text>
+          <text x="52" y="148" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.65">100</text>
+          <text x="52" y="100" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.65">150</text>
+          <text x="52" y="52" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.65">200</text>
+
+          <!-- bars: scale 48px per 50 events => 0.96 px per event -->
+          <rect x="86" y="135.4" width="84" height="104.6" rx="4" fill="#A97B22"></rect>
+          <text x="128" y="127" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="currentColor">109</text>
+          <text x="128" y="262" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity="0.8">1</text>
+
+          <rect x="204" y="109.4" width="84" height="130.6" rx="4" fill="#A97B22"></rect>
+          <text x="246" y="101" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="currentColor">136</text>
+          <text x="246" y="262" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity="0.8">3</text>
+
+          <rect x="322" y="72.9" width="84" height="167.1" rx="4" fill="#A97B22"></rect>
+          <text x="364" y="64" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="currentColor">174</text>
+          <text x="364" y="262" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity="0.8">6</text>
+
+          <rect x="440" y="58.6" width="84" height="181.4" rx="4" fill="#A97B22"></rect>
+          <text x="482" y="50" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="currentColor">189</text>
+          <text x="482" y="262" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity="0.8">12</text>
+
+          <rect x="558" y="76.8" width="84" height="163.2" rx="4" fill="#A97B22" opacity="0.55"></rect>
+          <text x="600" y="68" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="currentColor">170</text>
+          <text x="600" y="262" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity="0.8">15</text>
+
+          <!-- the ceiling annotation -->
+          <line x1="528" y1="34" x2="528" y2="240" stroke="#A03A2C" stroke-width="1.3" stroke-dasharray="4 3"></line>
+          <text x="536" y="30" font-family="IBM Plex Mono, monospace" font-size="10.5" font-weight="600" fill="#A03A2C">ceiling: 12 partitions</text>
+          <text x="536" y="292" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="#A03A2C">3 of 15 got no work at all</text>
+
+          <text x="62" y="292" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.7">workers in the group →</text>
+        </svg>
+      </div>
+      <figcaption>
+        Twelve times the workers buys <strong>1.7×</strong> the throughput, and past
+        twelve it gets worse. The topic has twelve partitions, so the thirteenth
+        worker onward is given nothing — that figure came from asking the broker
+        which worker owned which partition, not from guessing at the shape of the
+        curve, because a slow machine produces the same curve for a completely
+        different reason.
+      </figcaption>
+    </figure>
+  </div>
+
+  <div class="wide">
+    <figure class="chart">
+      <p class="c-title">And the queue was never the slow part</p>
+      <p class="c-sub">Same run · events per second, one linear scale</p>
+      <div class="chartwrap">
+        <svg viewBox="0 0 700 206" role="img" aria-label="Bar chart comparing two rates: the relay publishes about three thousand four hundred and eighteen events per second, while the workers deliver one hundred and eighty-nine per second at their best. The publishing side is roughly eighteen times faster.">
+          <line x1="150" y1="30" x2="150" y2="170" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+          <text x="140" y="66" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">publishing</text>
+          <rect x="150" y="44" width="504" height="34" rx="4" fill="#A97B22"></rect>
+          <text x="644" y="66" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="#FFFFFF">3,418 / sec</text>
+
+          <text x="140" y="128" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">delivering</text>
+          <rect x="150" y="106" width="28" height="34" rx="4" fill="#A97B22"></rect>
+          <text x="190" y="128" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="currentColor">189 / sec</text>
+
+          <text x="152" y="188" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.7">0</text>
+          <text x="654" y="188" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.7">3,500</text>
+        </svg>
+      </div>
+      <figcaption>
+        The broker keeps up roughly <strong>eighteen times</strong> more easily than
+        the workers do. What is actually slow is the per-message database work
+        inside each worker — which means the "we need a queue for throughput"
+        argument is the weakest reason this pipeline exists. It earns its place on
+        fanning one event out to three channels, on keeping a dead SMS provider
+        from stalling email, and on being able to replay a day's messages after
+        fixing a bug.
+      </figcaption>
+    </figure>
+  </div>
+
+  <div class="spine">
+    <h3>The rest of the measurements</h3>
+    <p>
+      Each of these comes from a script in the repository that can be re-run, and
+      each one shows the thing failing before it shows it working — a number with
+      no failing baseline next to it is hard to trust.
+    </p>
+  </div>
+
+  <div class="wide">
+    <div class="figures">
+      <div class="fig">
+        <span class="v">928 → 0</span>
+        <span class="k">database queries, cold vs cached</span>
+      </div>
+      <div class="fig">
+        <span class="v">30 → 10</span>
+        <span class="k">login attempts past a limit of 10, before and after sharing the counter</span>
+      </div>
+      <div class="fig">
+        <span class="v">11.1 ms</span>
+        <span class="k">median lag of the standby database</span>
+      </div>
+      <div class="fig">
+        <span class="v">500 rows</span>
+        <span class="k">recovered after a table was deliberately dropped</span>
+      </div>
+      <div class="fig">
+        <span class="v">0 and 0</span>
+        <span class="k">duplicates and losses when a worker was killed mid-batch</span>
+      </div>
+      <div class="fig">
+        <span class="v">1,263</span>
+        <span class="k">assertions across 35 suites, no mocks</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="spine">
+    <div class="seam">
+      <span class="seam-label">The one worth pausing on</span>
+      <p>
+        A worker was killed outright — no warning, no cleanup — with
+        <strong>2,215 of 3,000 messages still outstanding</strong>. The survivors
+        finished all 3,000, with zero duplicates and zero losses. Two mechanisms
+        had to hold at once for that: the position marker is only advanced
+        <em>after</em> a message is handled, so a crash re-delivers rather than
+        skips; and the ledger refuses the second claim, so a re-delivery cannot
+        become a second email. Either one alone fails — advance-first loses
+        messages, no-ledger doubles them.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">Swappable parts</p>
+    <h2>Every outside service sits behind a seam</h2>
+
+    <p>
+      Seven things live outside: taking payments, paying sellers, checking
+      identity documents, sending email, sending texts, storing files, and
+      carrying notifications between processes. Each one is reached through a
+      single small module with two implementations behind it — the real service,
+      and a stub — chosen by one environment variable.
+    </p>
+    <p>
+      <strong>The stubs are not placeholders for unwritten code.</strong> They are
+      what the automated tests run against, which is why the whole purchase,
+      refund and verification flow can be exercised with no credentials at all —
+      and why someone contributing from a fork of the repository, who cannot read
+      its secrets, still gets a meaningful green test run.
+    </p>
+  </div>
+
+  <div class="wide">
+    <div class="tablewrap">
+      <table>
+        <caption>Seven seams</caption>
+        <thead>
+          <tr><th>Concern</th><th>The real one</th><th>The stub</th><th class="mono">Chosen by</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Payments</td>
+            <td>Stripe, in test mode</td>
+            <td>In-process, driven by test card numbers</td>
+            <td class="mono">PAYMENT_PROVIDER</td>
+          </tr>
+          <tr>
+            <td>Identity</td>
+            <td>Stripe Identity</td>
+            <td>Outcome decided by the document number</td>
+            <td class="mono">KYC_PROVIDER</td>
+          </tr>
+          <tr>
+            <td>Email</td>
+            <td>Any SMTP server</td>
+            <td>Printed to the terminal, or a throwaway inbox</td>
+            <td class="mono">MAIL_TRANSPORT</td>
+          </tr>
+          <tr>
+            <td>SMS</td>
+            <td>Twilio, over its REST API</td>
+            <td>Recorded in memory; returns the code so a person can finish the flow</td>
+            <td class="mono">SMS_PROVIDER</td>
+          </tr>
+          <tr>
+            <td>Notifications</td>
+            <td>Kafka, with separate worker processes</td>
+            <td>Handed straight to the same functions, in-process</td>
+            <td class="mono">NOTIFY_TRANSPORT</td>
+          </tr>
+          <tr>
+            <td>File storage</td>
+            <td>Any S3-compatible object store</td>
+            <td>Local disk, with the same key validation so a swap cannot orphan a URL</td>
+            <td class="mono">STORAGE_DRIVER</td>
+          </tr>
+          <tr>
+            <td>Payouts</td>
+            <td>Stripe Connect: accounts, onboarding, transfers, reversals</td>
+            <td>Accounts in memory and a transfer id derived from the payout, so the whole path runs with no Stripe account</td>
+            <td class="mono">PAYOUT_PROVIDER</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="spine">
+    <p style="margin-top:1.5rem">
+      The API prints which of each it is using when it starts, and the interface
+      says so on screen where a user could be misled. <strong>A stub that silently
+      looks real is worse than no stub at all.</strong>
+    </p>
+
+    <h3>Identity documents are the sharpest case</h3>
+    <p>
+      A government ID is exactly the kind of data that turns a database into
+      something worth attacking, for no product benefit. So the system stores a
+      reference to somebody else's verification result and never the document —
+      and with the real provider the document never reaches this server in the
+      first place. Switching provider does not merely swap an implementation; it
+      shrinks what the application is <em>capable</em> of leaking.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">The data</p>
+    <h2>Twenty-eight tables, in six groups</h2>
+
+    <p>
+      Postgres is the only thing that is ever authoritative. Everything else in
+      the system can be rebuilt from it.
+    </p>
+  </div>
+
+  <div class="wide">
+    <div class="tablewrap">
+      <table>
+        <caption>What is stored, and the one rule that governs each group</caption>
+        <thead>
+          <tr><th>Group</th><th>Tables</th><th>The rule that matters</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>People</strong></td>
+            <td class="mono">users · refresh_tokens · email_verification_tokens · password_reset_tokens · phone_verifications</td>
+            <td>Every credential is hashed. One account type — selling is a capability you switch on, not a different kind of user</td>
+          </tr>
+          <tr>
+            <td><strong>Selling</strong></td>
+            <td class="mono">seller_profiles · kyc_attempts · categories · listings · listing_images</td>
+            <td>Listings are never really deleted — a past order has to stay readable, so they are marked removed instead</td>
+          </tr>
+          <tr>
+            <td><strong>Buying</strong></td>
+            <td class="mono">reservations · orders · order_items · addresses · wishlist_items</td>
+            <td>Money is stored as whole cents, never a decimal, so no rounding can happen in transit. Addresses are copied onto the order, so editing your address later cannot rewrite history</td>
+          </tr>
+          <tr>
+            <td><strong>Trust</strong></td>
+            <td class="mono">reviews · reports · moderation_actions · refunds</td>
+            <td>Ratings are computed from review rows rather than stored, and the moderation log can only be appended to — including by whoever wrote it</td>
+          </tr>
+          <tr>
+            <td><strong>Telling people</strong></td>
+            <td class="mono">notifications · outbox_events · notification_deliveries · notification_preferences · push_subscriptions</td>
+            <td>The notification is the record; a delivery is one attempt on one channel. Preferences store only what someone actively changed</td>
+          </tr>
+          <tr>
+            <td class="mono">payouts · payout_items · payout_debts · return_requests</td>
+            <td>Money going back out, and the two constraints that make it safe: one payout line per item sold, and one return request per item, both enforced by the database rather than by a check in the code</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="spine">
+    <h3>Two details that explain a lot of the rest</h3>
+    <p>
+      <strong>Preferences store deviations, not state.</strong> An absent row
+      means "use the default". The alternative — a row per person per event per
+      channel, created at signup — would mean that adding a twelfth event type
+      requires touching every account in the database before it can be sent at
+      all, and would store thirty-three rows per person to record that they never
+      opened the settings page.
+    </p>
+    <p>
+      <strong>A delivery record outlives the account it was for.</strong> There is
+      deliberately no foreign key from a delivery to a user, so "this was sent to
+      an account since deleted" remains a real, answerable question.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">Confidence</p>
+    <h2>How it is tested, and what testing means here</h2>
+
+    <p>
+      Thirty-five suites, 1,263 assertions, and <strong>nothing is mocked.</strong>
+      The tests drive a real Postgres, the real Express API, and a production
+      build of the site under a real browser — on the view that the bugs worth
+      catching live in the seams between the pieces rather than inside any one of
+      them.
+    </p>
+    <p>
+      That has a cost, and it is paid deliberately: the suite needs a database, a
+      Redis, and both servers running, and it takes about thirteen minutes.
+    </p>
+
+    <h3>Testing a message broker without requiring one</h3>
+    <p>
+      Adding Kafka to every test run would slow the pipeline and give contributors
+      one more thing to install. So the notification transport has the same shape
+      as the payment and identity seams: by default the relay hands events
+      <em>straight to the same worker functions</em>, in-process, no broker
+      involved. Preference resolution, the duplicate guard, template rendering,
+      the provider calls — all of it runs for real. Only the wire is absent.
+    </p>
+    <p>
+      The handful of claims that genuinely need a broker live in one gated
+      section, and when there is no broker that section <strong>skips loudly and
+      names what went unproven</strong> rather than passing quietly. A section
+      that reports green for something nobody ran is worse than no section,
+      because it gets believed.
+    </p>
+
+    <div class="gap">
+      <span class="gap-label">Found by finally running it</span>
+      <p>
+        That gated section had never actually executed. The first time it did, it
+        <em>failed</em> — it produced its messages after subscribing and lost a
+        race with the broker's group assignment, which no amount of waiting would
+        have fixed reliably. Gated code that has never run is not tested; it is
+        only written.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">Running it</p>
+    <h2>One image definition, several programs</h2>
+
+    <p>
+      A single Dockerfile describes every process the system can run, each as its
+      own build target: the API, the website, the database with its backup
+      tooling, the notification relay, and the channel workers. The relay and the
+      workers are separate programs precisely so they can be scaled and can fail
+      independently of the website.
+    </p>
+    <p>
+      Bringing everything up is one command. Two of the containers exit
+      immediately, and that is correct — one applies pending database migrations
+      and one creates the file-storage bucket, both finishing before the API
+      starts. Doing either of those at API startup is the usual shortcut, and it
+      breaks the moment there is more than one copy of the API racing to do it.
+    </p>
+    <p>
+      Optional pieces sit behind named profiles, so a plain start-up stays small:
+      the standby database, the message broker with its relay and workers, and
+      one-off tools like seeding and backups.
+    </p>
+
+    <h3>And on a cluster, where the database can be replaced</h3>
+    <p>
+      Compose can start everything on one machine and it can do nothing about a
+      machine that dies. So the same images also have Kubernetes manifests, and
+      the interesting part is what happens to Postgres: it is not a workload
+      written by hand here but a <strong>CloudNativePG cluster</strong>, which is
+      an operator whose whole job is knowing how to promote a replica when the
+      primary stops answering.
+    </p>
+    <p>
+      That claim was tested rather than assumed. Deleting the primary's pod on a
+      local cluster produced a promoted replica, and a write submitted afterwards
+      — a real signup, through the website, to the database — succeeded. The
+      figure worth noticing is the last one:
+    </p>
+
+    <div class="figures">
+      <div class="fig">
+        <span class="v">2 of 2</span>
+        <span class="k">rows found in the promoted instance: one written before the kill, one after</span>
+      </div>
+      <div class="fig">
+        <span class="v">0</span>
+        <span class="k">API restarts needed to reconnect</span>
+      </div>
+      <div class="fig">
+        <span class="v">199s</span>
+        <span class="k">promotion, on one laptop node with no spare memory</span>
+      </div>
+    </div>
+
+    <div class="seam">
+      <span class="seam-label">Why the restart count is the number to read</span>
+      <p>
+        Any orchestrator will restart a pod, and a restart would have hidden the
+        question. The connection pool inside the API had cached an address that
+        stopped being the primary — and it recovered on its own, because it
+        connects to a name the operator moves rather than to an instance. Had it
+        needed bouncing, the demonstration would still have "passed" while
+        concealing the thing worth demonstrating.
+      </p>
+    </div>
+
+    <p style="margin-top:1.4rem">
+      Two things are honest to say about it. <strong>199 seconds is slow</strong>,
+      and it is printed rather than smoothed over: a promotion is a short
+      automatic outage, not an invisible one, and the site did return errors
+      during the window. And <strong>this ran on a laptop, not a cloud.</strong>
+      A manifest that applies locally can still be wrong about a load balancer.
+    </p>
+
+    <h3>One scheduled job, and five that stayed where they were</h3>
+    <p>
+      A cluster brings a scheduler, and the obvious move is to take every
+      background loop in the application and make each one a scheduled job. That
+      would have been a step backwards. Five recovery sweepers run inside the
+      API — returning expired holds to stock, settling payments whose request
+      died, sending messages that quiet hours parked — and each of them claims
+      its work with the same conditional write the rest of this document is
+      about. Which means <em>several copies divide the work</em> rather than
+      repeating it, and one scheduled job would have serialised what currently
+      parallelises.
+    </p>
+    <p>
+      Exactly one thing became a scheduled job: finishing a payout that was
+      claimed and never transferred, because the provider timed out. It is
+      scheduled for a reason that has nothing to do with tidiness — it moves
+      money to somebody else. A job has an exit code, a start time and a record;
+      a loop inside the process serving checkout has only log lines, and shares a
+      thread pool with people trying to buy things.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">Honesty</p>
+    <h2>What is deliberately not built</h2>
+
+    <p>
+      A description that only lists what works is a sales document. These are the
+      real edges, and most of them are known trade-offs rather than oversights.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Known gaps</caption>
+        <thead>
+          <tr><th>Gap</th><th>Why it is still open</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>No real money has ever moved</strong></td>
+            <td>The largest one, and it did not shrink when payouts were built — it moved. Payments, identity and payouts all run against provider stubs or Stripe's test mode. No connected account has been created, no transfer issued, no document checked. What is proven is the ordering and the constraints; what is unproven is every provider behind them</td>
+          </tr>
+          <tr>
+            <td><strong>No cluster but a local one</strong></td>
+            <td>Kubernetes manifests exist and were verified on kind: deleting the Postgres primary promoted a replica and a write then succeeded with zero API restarts. But a manifest that applies locally can still be wrong about a cloud load balancer, an ingress class or a storage class — and the Kafka half of the deployment is not written at all</td>
+          </tr>
+          <tr>
+            <td><strong>A return is approved on trust</strong></td>
+            <td>Nothing tracks the parcel going back. Approval is the seller saying they are content, because a scan-triggered refund needs a carrier integration that does not exist — the same one that made prepaid outbound labels a promise worth deleting rather than keeping</td>
+          </tr>
+          <tr>
+            <td><strong>Search reads every row</strong></td>
+            <td>It is substring matching, which no index can help with. Fine at this size; a proper text index is the upgrade</td>
+          </tr>
+          <tr>
+            <td><strong>Backups are not scheduled</strong></td>
+            <td>Still true in both deployments. Recovery works and has been rehearsed, but a base backup is taken by hand and nothing expires old ones. CloudNativePG does scheduling, retention and verification in one block — and the manifests deliberately leave it out, because it needs a bucket and credentials that differ per environment. The mechanism has a home and nothing uses it</td>
+          </tr>
+          <tr>
+            <td><strong>Quiet hours use the server's clock</strong></td>
+            <td>Deferring works; the timezone is wrong. There is no timezone recorded against a person, so someone abroad is quiet during the server's night rather than their own</td>
+          </tr>
+          <tr>
+            <td><strong>Nothing reads the standby</strong></td>
+            <td>On purpose. Sending reads there introduces a class of bug where you cannot see your own order right after placing it, and caching already absorbed the read volume</td>
+          </tr>
+          <tr>
+            <td><strong>One test assertion is flaky</strong></td>
+            <td>A card-data check scans every order for the test cards' last four digits, which can match an unrelated identifier another suite left behind. It is a scoping problem in the check, not a leak</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="gap">
+      <span class="gap-label">And one that is worth naming as a pattern</span>
+      <p>
+        Three pieces of the notification pipeline had to be built <em>after</em>
+        the phase that argued for them was declared finished: the retry ladder
+        was designed and never wired up; quiet hours shipped as a silent drop
+        rather than a deferral; and the sweeper that rescues a half-finished send
+        went unbuilt through four phases. Each was caught by writing something
+        that measured the claim rather than restating it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">The reasoning</p>
+    <h2>Thirty-two decisions, each with its rejected alternatives</h2>
+
+    <p>
+      Every non-obvious choice above has a record explaining what was decided,
+      what else was considered, and what it costs. They are load-bearing
+      documents: they carry the reasoning the code cannot.
+    </p>
+  </div>
+
+  <div class="wide">
+    <div class="adrs">
+      <div class="adr"><span class="n">0001</span><span>Access and rotating refresh tokens, with reuse detection</span></div>
+      <div class="adr"><span class="n">0002</span><span>Next.js as a forwarding layer, not direct browser-to-API calls</span></div>
+      <div class="adr"><span class="n">0003</span><span>One account type; selling is a capability</span></div>
+      <div class="adr"><span class="n">0004</span><span>Password length and a breach check, not composition rules</span></div>
+      <div class="adr"><span class="n">0005</span><span>Money as whole cents</span></div>
+      <div class="adr"><span class="n">0006</span><span>Store a verification reference, never the document</span></div>
+      <div class="adr"><span class="n">0007</span><span>Verification gates payouts, not listing</span></div>
+      <div class="adr"><span class="n">0008</span><span>Soft delete plus a status, not a stock count</span></div>
+      <div class="adr"><span class="n">0009</span><span>Compute ratings from review rows</span></div>
+      <div class="adr"><span class="n">0010</span><span>Re-encode uploads to strip location data</span></div>
+      <div class="adr"><span class="n">0011</span><span>Avatars in object storage, referenced by URL</span></div>
+      <div class="adr"><span class="n">0012</span><span>Row-level locking for stock</span></div>
+      <div class="adr"><span class="n">0013</span><span>Claim the payment before charging it</span></div>
+      <div class="adr"><span class="n">0014</span><span>One order per basket, fulfilment per line, addresses copied</span></div>
+      <div class="adr"><span class="n">0015</span><span>Admin granted only from a shell, then a second factor to open the panel</span></div>
+      <div class="adr"><span class="n">0016</span><span>Claim refund headroom atomically, then refund</span></div>
+      <div class="adr"><span class="n">0017</span><span>Password change and reset without revealing who has an account</span></div>
+      <div class="adr"><span class="n">0018</span><span>Redis for shared throwaway state only, never a source of truth</span></div>
+      <div class="adr"><span class="n">0019</span><span>A rule for what may be cached — which amends 0018</span></div>
+      <div class="adr"><span class="n">0020</span><span>A streaming standby, and recovery to any point in time</span></div>
+      <div class="adr"><span class="n">0021</span><span>Concurrent token refresh settled in Postgres, not with a lock</span></div>
+      <div class="adr"><span class="n">0022</span><span>Object storage for uploads — the last thing blocking a second server</span></div>
+      <div class="adr"><span class="n">0023</span><span>One Dockerfile with a target per program</span></div>
+      <div class="adr"><span class="n">0024</span><span>An outbox, instead of writing to two systems and hoping</span></div>
+      <div class="adr"><span class="n">0025</span><span>One topic keyed by person; delays on separate queues</span></div>
+      <div class="adr"><span class="n">0026</span><span>A delivery ledger, claimed before the provider is called</span></div>
+      <div class="adr"><span class="n">0027</span><span>Consent before delivery: verified numbers, per-event choices, unsubscribe</span></div>
+      <div class="adr"><span class="n">0028</span><span>Twilio for SMS, behind the same kind of seam as payments</span></div>
+      <div class="adr"><span class="n">0029</span><span>Pay sellers with separate transfers, not destination charges</span></div>
+      <div class="adr"><span class="n">0030</span><span>What makes money payable, and the ledger that stops it being paid twice</span></div>
+      <div class="adr"><span class="n">0031</span><span>Buyer-initiated returns, as a request the seller answers</span></div>
+      <div class="adr"><span class="n">0032</span><span>An operator for Postgres, plain manifests for everything else</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="spine">
+    <p class="eyebrow">Vocabulary</p>
+    <h2>The handful of words that do the most work</h2>
+
+    <dl class="terms">
+      <div class="term">
+        <dt>Seam</dt>
+        <dd>A single small module that stands between the system and an outside
+        service, with a real implementation and a stub behind it. Changing
+        provider means editing one file.</dd>
+      </div>
+      <div class="term">
+        <dt>Outbox</dt>
+        <dd>An ordinary database table that events are written into, in the same
+        transaction as the thing they describe, so the pair cannot come apart.</dd>
+      </div>
+      <div class="term">
+        <dt>Relay</dt>
+        <dd>The small program that reads committed outbox rows and publishes them
+        onward. Several can run at once without publishing anything twice.</dd>
+      </div>
+      <div class="term">
+        <dt>Ledger</dt>
+        <dd>One row per notification per channel, written <em>before</em> the
+        provider is called. A repeat attempt collides with that row and stops,
+        which is what makes an at-least-once queue safe to point at a phone.</dd>
+      </div>
+      <div class="term">
+        <dt>Claim</dt>
+        <dd>A single write whose success <em>is</em> the permission to proceed.
+        Used instead of checking and then acting, because two callers can both
+        pass a check and only one can win a write.</dd>
+      </div>
+      <div class="term">
+        <dt>Suppressed</dt>
+        <dd>A delivery that was deliberately not sent — the channel was off, there
+        was no verified number, it was quiet hours. Recorded rather than dropped,
+        so "why did nothing arrive?" has an answer.</dd>
+      </div>
+      <div class="term">
+        <dt>Sweeper</dt>
+        <dd>A timer that recovers state nothing in the normal request path will
+        ever reach again: expired holds, unpaid orders, parked messages, half-
+        finished sends, spent outbox rows.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<footer>
+  <div class="spine">
+    RetailStore_2n · architecture reference<br>
+    Sources of record: docs/architecture/, docs/adr/ (28 records), docs/plans/0001<br>
+    Every figure on this page came from a script in the repository that can be re-run.
+  </div>
+</footer>
+
+</body></html>

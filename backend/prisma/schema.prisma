@@ -13,10 +13,25 @@ model User {
   passwordHash       String
   name               String
   isSeller           Boolean                  @default(false)
+  emailVerified      Boolean                  @default(false)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   refreshTokens      RefreshToken[]
+  verificationTokens EmailVerificationToken[]
   @@map("users")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId])
+  @@map("email_verification_tokens")
 }
 
 model RefreshToken {

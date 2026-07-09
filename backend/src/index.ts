@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import { authRouter } from "./routes/auth";
+import { assertMailConfigured } from "./lib/mailer";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -18,7 +19,9 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/auth", authRouter);
+let mailSummary: string;
 try {
+  mailSummary = assertMailConfigured();
 } catch (err) {
   console.error(`\nConfiguration error:\n  ${(err as Error).message}\n`);
   process.exit(1);
@@ -26,4 +29,5 @@ try {
 
 app.listen(PORT, () => {
   console.log(`RetailStore_2n backend listening on http://localhost:${PORT}`);
+  console.log(`Email:    ${mailSummary}`);
 });

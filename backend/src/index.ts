@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import { authRouter } from "./routes/auth";
+import { catalogRouter } from "./routes/catalog";
 import { assertMailConfigured } from "./lib/mailer";
 
 const app = express();
@@ -19,6 +20,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/auth", authRouter);
+app.use("/catalog", catalogRouter);
 let mailSummary: string;
 try {
   mailSummary = assertMailConfigured();

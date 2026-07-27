@@ -202,3 +202,104 @@ Revokes the refresh token and clears cookies. `204`.
             "isSeller": false, "emailVerified": true, "createdAt": "…" } }
 ```
 
+## Catalog — `/catalog` (public)
+
+Only listings with `status = ACTIVE` and `deletedAt IS NULL` are ever returned.
+
+### `GET /catalog/categories`
+
+```json
+{ "categories": [
+  { "id": "…", "slug": "furniture-home", "title": "Furniture & Home",
+    "description": "…", "coverImage": "https://…", "listingCount": 3 }
+] }
+```
+
+`listingCount` counts visible listings only.
+
+### `GET /catalog/promoted`
+
+What is on the homepage because a seller agreed to pay for it
+([ADR 0034](adr/0034-paid-homepage-placement.md)).
+
+```json
+{
+  "hero": { "id": "…", "slug": "…", "title": "…", "promoted": true, "…": "…" },
+  "shelf": [ { "id": "…", "promoted": true, "…": "…" } ]
+}
+```
+
+Listings are the ordinary catalog shape plus **`promoted: true`**. That flag is
+what the card and the banner render their "Promoted" label from, and it travels
+with the data rather than being inferred by the page — a client cannot
+accidentally render a paid placement as an editorial pick.
+
+**Not cached**, unlike the rest of this section. A placement going live is a
+window somebody bought, and a sixty-second cache spends the first minute of it.
+
+Only live placements on listings that are still `ACTIVE` appear, so a promoted
+item that sells drops out immediately. An error answers `{"hero": null,
+"shelf": []}` rather than a 500: the homepage has four other shelves.
+
+### `GET /catalog/listings`
+
+| Param | Type | Notes |
+| --- | --- | --- |
+| `q` | string | Case-insensitive substring of title or description |
+| `category` | slug | |
+| `condition` | enum | `LIKE_NEW` \| `GOOD` \| `WELL_LOVED` \| `NEEDS_REPAIR` |
+| `minPrice`, `maxPrice` | number | **Whole currency units** |
+| `featured` | `true` \| `false` | |
+| `sort` | enum | `newest` (default), `price_asc`, `price_desc` |
+| `page` | int | Default 1 |
+| `limit` | int | Default 24, max 48 |
+
+Empty-string params are treated as absent, so an untouched filter form is a
+valid request.
+
+```json
+{
+  "listings": [ { /* listing */ } ],
+  "total": 13, "page": 1, "limit": 24, "pageCount": 1
+}
+```
+
+Listing object:
+
+```json
+{
+  "id": "…", "slug": "brown-leather-jacket",
+  "title": "Brown leather jacket", "description": "…",
+  "condition": "LIKE_NEW", "conditionNote": "Like new",
+  "priceCents": 12000, "originalPriceCents": 15000, "currency": "USD",
+  "quantity": 1, "featured": false, "createdAt": "2026-08-19T…",
+  "category": { "slug": "clothing-accessories", "title": "Clothing & Accessories" },
+  "seller":   { "shopName": "RetailStore_2n Collection", "verified": true },
+  "images":   [ { "url": "https://…", "alt": "…", "position": 0 } ],
+  "rating":   { "average": 4.8, "count": 5 }
+}
+```
+
+`rating.average` is `null` when there are no reviews — not `0`.
+`seller.verified` is derived from KYC status and exposes no verification detail.
+
+`400 INVALID_PRICE_RANGE` when `minPrice > maxPrice`.
+
+### `GET /catalog/listings/:slug`
+
+Adds `reviews` to the listing (newest 20) and a sibling `related` array (up to
+4 from the same category).
+
+```json
+{
+  "listing": { "…": "…", "reviews": [
+    { "id": "…", "rating": 5, "body": "…", "createdAt": "…", "authorName": "Noah Brenner" }
+  ] },
+  "related": [ { /* listing */ } ]
+}
+```
+
+`404 NOT_FOUND` if the slug is unknown, unpublished, or soft-deleted.
+
+---
+

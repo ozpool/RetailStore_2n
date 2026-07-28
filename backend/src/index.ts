@@ -4,6 +4,7 @@ import cors from "cors";
 import express from "express";
 import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
+import { sellerRouter } from "./routes/seller";
 import { assertMailConfigured } from "./lib/mailer";
 
 const app = express();
@@ -21,6 +22,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/auth", authRouter);
 app.use("/catalog", catalogRouter);
+app.use("/seller", sellerRouter);
 let mailSummary: string;
 try {
   mailSummary = assertMailConfigured();

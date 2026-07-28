@@ -126,6 +126,11 @@ model Listing {
   quantity Int           @default(1)
   status   ListingStatus @default(DRAFT)
 
+  /// Merchandising flag for the "Picked for you" shelf. This is hand-curation,
+  /// not personalisation — there is no recommendation engine behind it, and
+  /// naming it `featured` keeps that honest at the data layer.
+  featured Boolean @default(false)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   /// Soft delete — a listing referenced by a past order must never vanish.
@@ -138,6 +143,7 @@ model Listing {
   @@index([sellerId])
   @@index([status])
   @@index([createdAt])
+  @@index([featured])
   @@map("listings")
 }
 

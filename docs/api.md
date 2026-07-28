@@ -202,6 +202,13 @@ Revokes the refresh token and clears cookies. `204`.
             "isSeller": false, "emailVerified": true, "createdAt": "…" } }
 ```
 
+### `POST /auth/become-seller` 🔒
+
+Sets `isSeller` and creates the `SellerProfile` in one transaction. Idempotent.
+`200` → `{ "user": { ... } }`
+
+---
+
 ## Catalog — `/catalog` (public)
 
 Only listings with `status = ACTIVE` and `deletedAt IS NULL` are ever returned.
@@ -300,6 +307,102 @@ Adds `reviews` to the listing (newest 20) and a sibling `related` array (up to
 ```
 
 `404 NOT_FOUND` if the slug is unknown, unpublished, or soft-deleted.
+
+---
+
+## Seller — `/seller` 🔒🏪
+
+Non-sellers receive `403 NOT_A_SELLER`.
+
+Every route is scoped to the caller's own records. **A listing owned by another
+seller returns 404, not 403** — a 403 would confirm the id exists.
+
+### `GET /seller/me`
+
+```json
+{ "seller": { "id": "…", "shopName": "…", "bio": null,
+              "kycStatus": "UNSTARTED", "payoutsEnabled": false, "createdAt": "…" },
+  "counts": { "DRAFT": 2, "ACTIVE": 5 } }
+```
+
+### `GET /seller/listings`
+
+All of the caller's listings, any status, newest-updated first. Excludes
+soft-deleted.
+
+### `GET /seller/listings/:id`
+
+### `POST /seller/listings`
+
+```json
+{
+  "title": "Walnut side table",
+  "description": "At least 10 characters.",
+  "categoryId": "<uuid>",
+  "condition": "GOOD",
+  "conditionNote": "Water ring",
+  "priceCents": 8500,
+  "originalPriceCents": 11000,
+  "quantity": 1,
+  "currency": "USD"
+}
+```
+
+Constraints: `title` 3–120, `description` 10–4000, `conditionNote` ≤ 60,
+`priceCents` ≥ 1, `quantity` 1–999, and `originalPriceCents` must exceed
+`priceCents`.
+
+Created as `DRAFT`. `slug` is derived from the title and fixed thereafter.
+
+`201` → `{ "listing": { ... } }`
+
+### `PATCH /seller/listings/:id`
+
+Accepts any subset of the create body. The `slug` is **not** regenerated when
+the title changes. `409 LISTING_SOLD` if the listing is sold.
+
+### `POST /seller/listings/:id/publish`
+
+`DRAFT` → `ACTIVE`.
+
+| Failure | Code |
+| --- | --- |
+| No photos | `NEEDS_PHOTO` |
+| Already sold | `LISTING_SOLD` |
+
+Deliberately **not** gated on identity verification
+([ADR 0007](adr/0007-verification-gates-payouts.md)).
+
+### `POST /seller/listings/:id/unpublish`
+
+`ACTIVE` → `DRAFT`.
+
+### `DELETE /seller/listings/:id`
+
+Soft delete: sets `deletedAt` and `status = REMOVED`. `204`.
+
+### `POST /seller/listings/:id/images`
+
+`multipart/form-data`, field name `image`. JPEG, PNG, or WebP; max 8 MB; max 8
+images per listing; 30 uploads per user per hour.
+
+The file is validated by **magic bytes** (not extension or `Content-Type`) and
+re-encoded to WebP, which strips EXIF including GPS.
+
+`201` → `{ "image": { "id": "…", "url": "…", "alt": "…", "position": 0 } }`
+
+| Failure | Code |
+| --- | --- |
+| Not a real image | `INVALID_IMAGE` |
+| Over 8 MB / unreadable upload | `UPLOAD_FAILED` |
+| Nothing attached | `NO_FILE` |
+| Already 8 images | `TOO_MANY_IMAGES` |
+| Hourly cap hit | `RATE_LIMITED` |
+
+### `DELETE /seller/listings/:id/images/:imageId`
+
+`204`. Returns `400 NEEDS_PHOTO` when removing the only photo of a published
+listing.
 
 ---
 

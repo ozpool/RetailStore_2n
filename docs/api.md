@@ -406,3 +406,14 @@ listing.
 
 ---
 
+## Static files
+
+### `GET /uploads/:key`
+
+Processed seller images. Keys are server-generated (32 hex + extension) and
+served immutable with a one-year cache, since they are never reused.
+
+In development Next.js needs `images.dangerouslyAllowLocalIP` to optimise these,
+because Next 16 blocks image optimisation from private IPs as SSRF protection.
+It is scoped to development only — in production these come from object storage
+on a public hostname.

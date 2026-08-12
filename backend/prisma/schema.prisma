@@ -7,6 +7,33 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Lifecycle of a listing. Most goods here are one-of-a-kind, so the
+/// important guarantee is "nobody else can buy this one", not a stock count.
+/// RESERVED exists so checkout can hold a unique item without selling it twice.
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  RESERVED
+  SOLD
+  REMOVED
+}
+
+/// Constrained so buyers can actually filter on it. The seller's own wording
+/// lives in Listing.conditionNote, which is what the UI shows.
+enum Condition {
+  LIKE_NEW
+  GOOD
+  WELL_LOVED
+  NEEDS_REPAIR
+}
+
+enum VerificationStatus {
+  UNSTARTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 model User {
   id                 String                   @id @default(uuid())
   email              String                   @unique
@@ -18,7 +45,139 @@ model User {
   updatedAt          DateTime                 @updatedAt
   refreshTokens      RefreshToken[]
   verificationTokens EmailVerificationToken[]
+  sellerProfile      SellerProfile?
+  reviews            Review[]
   @@map("users")
+}
+
+/// One-to-one with User, created when someone starts selling. Kept separate
+/// from User so identity-verification and payout state don't bloat the row
+/// every auth request reads.
+model SellerProfile {
+  id       String  @id @default(uuid())
+  userId   String  @unique
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopName String
+  bio      String?
+
+  /// Identity verification is a REFERENCE to a provider's result — never the
+  /// document itself. Storing raw government ID images or numbers would make
+  /// this table a breach target and pull it under special-category data rules
+  /// (GDPR, India's DPDP Act). We keep only what we need to prove state.
+  kycStatus          VerificationStatus @default(UNSTARTED)
+  kycProvider        String?
+  kycSessionId       String?
+  kycDocType         String?
+  kycCountry         String?
+  kycVerifiedAt      DateTime?
+  kycRejectionReason String?
+
+  /// Gated by kycStatus. Following the Stripe Connect model: you may list
+  /// items unverified, but money cannot move to you until identity clears.
+  /// OUR gate: set only from a recorded identity decision. See ADR 0007 and
+  /// lib/verification.ts, which is the single place allowed to write it.
+  payoutsEnabled Boolean @default(false)
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  listings    Listing[]
+
+  @@map("seller_profiles")
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  slug        String    @unique
+  title       String
+  description String
+  coverImage  String
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  listings    Listing[]
+
+  @@map("categories")
+}
+
+model Listing {
+  id          String @id @default(uuid())
+  slug        String @unique
+  title       String
+  description String
+
+  sellerId   String
+  seller     SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category      @relation(fields: [categoryId], references: [id])
+
+  condition     Condition
+  /// The seller's own phrasing ("Needs a tune-up", "Varies by piece"). This is
+  /// what renders on the card; `condition` is what powers filtering.
+  conditionNote String?
+
+  /// Money is stored as integer minor units. Never floats — 0.1 + 0.2 problems
+  /// have no place in a price column.
+  priceCents         Int
+  originalPriceCents Int?
+  currency           String @default("USD")
+
+  /// Defaults to 1: most secondhand goods are unique. Present because a seller
+  /// may genuinely have several identical pieces.
+  quantity Int           @default(1)
+  status   ListingStatus @default(DRAFT)
+
+  /// Merchandising flag for the "Picked for you" shelf. This is hand-curation,
+  /// not personalisation — there is no recommendation engine behind it, and
+  /// naming it `featured` keeps that honest at the data layer.
+  featured Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /// Soft delete — a listing referenced by a past order must never vanish.
+  deletedAt DateTime?
+
+  images       ListingImage[]
+  reviews      Review[]
+
+  @@index([categoryId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([featured])
+  @@map("listings")
+}
+
+model ListingImage {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  /// 0 is the cover image.
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([listingId])
+  @@map("listing_images")
+}
+
+/// Ratings shown in the UI are computed from these rows, not stored as a
+/// number on the listing. A listing with no reviews honestly shows none.
+model Review {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// Whole stars, 1-5. Enforced in the app layer.
+  rating    Int
+  body      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listingId, authorId])
+  @@index([listingId])
+  @@map("reviews")
 }
 
 model EmailVerificationToken {

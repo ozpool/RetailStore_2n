@@ -23,6 +23,7 @@ const SUITES: Suite[] = [
   // Fast first: an API failure is usually the real cause of a browser failure,
   // and finding it in ten seconds beats finding it in four minutes.
   { name: "refresh", file: "api/refresh.ts", kind: "api" },
+  { name: "uploads", file: "api/uploads.ts", kind: "api" },
   { name: "identity", file: "api/identity.ts", kind: "api" },
 ];
 

@@ -202,3 +202,218 @@ Revokes the refresh token and clears cookies. `204`.
             "isSeller": false, "emailVerified": true, "createdAt": "…" } }
 ```
 
+### `POST /auth/become-seller` 🔒
+
+Sets `isSeller` and creates the `SellerProfile` in one transaction. Idempotent.
+`200` → `{ "user": { ... } }`
+
+---
+
+## Catalog — `/catalog` (public)
+
+Only listings with `status = ACTIVE` and `deletedAt IS NULL` are ever returned.
+
+### `GET /catalog/categories`
+
+```json
+{ "categories": [
+  { "id": "…", "slug": "furniture-home", "title": "Furniture & Home",
+    "description": "…", "coverImage": "https://…", "listingCount": 3 }
+] }
+```
+
+`listingCount` counts visible listings only.
+
+### `GET /catalog/promoted`
+
+What is on the homepage because a seller agreed to pay for it
+([ADR 0034](adr/0034-paid-homepage-placement.md)).
+
+```json
+{
+  "hero": { "id": "…", "slug": "…", "title": "…", "promoted": true, "…": "…" },
+  "shelf": [ { "id": "…", "promoted": true, "…": "…" } ]
+}
+```
+
+Listings are the ordinary catalog shape plus **`promoted: true`**. That flag is
+what the card and the banner render their "Promoted" label from, and it travels
+with the data rather than being inferred by the page — a client cannot
+accidentally render a paid placement as an editorial pick.
+
+**Not cached**, unlike the rest of this section. A placement going live is a
+window somebody bought, and a sixty-second cache spends the first minute of it.
+
+Only live placements on listings that are still `ACTIVE` appear, so a promoted
+item that sells drops out immediately. An error answers `{"hero": null,
+"shelf": []}` rather than a 500: the homepage has four other shelves.
+
+### `GET /catalog/listings`
+
+| Param | Type | Notes |
+| --- | --- | --- |
+| `q` | string | Case-insensitive substring of title or description |
+| `category` | slug | |
+| `condition` | enum | `LIKE_NEW` \| `GOOD` \| `WELL_LOVED` \| `NEEDS_REPAIR` |
+| `minPrice`, `maxPrice` | number | **Whole currency units** |
+| `featured` | `true` \| `false` | |
+| `sort` | enum | `newest` (default), `price_asc`, `price_desc` |
+| `page` | int | Default 1 |
+| `limit` | int | Default 24, max 48 |
+
+Empty-string params are treated as absent, so an untouched filter form is a
+valid request.
+
+```json
+{
+  "listings": [ { /* listing */ } ],
+  "total": 13, "page": 1, "limit": 24, "pageCount": 1
+}
+```
+
+Listing object:
+
+```json
+{
+  "id": "…", "slug": "brown-leather-jacket",
+  "title": "Brown leather jacket", "description": "…",
+  "condition": "LIKE_NEW", "conditionNote": "Like new",
+  "priceCents": 12000, "originalPriceCents": 15000, "currency": "USD",
+  "quantity": 1, "featured": false, "createdAt": "2026-08-19T…",
+  "category": { "slug": "clothing-accessories", "title": "Clothing & Accessories" },
+  "seller":   { "shopName": "RetailStore_2n Collection", "verified": true },
+  "images":   [ { "url": "https://…", "alt": "…", "position": 0 } ],
+  "rating":   { "average": 4.8, "count": 5 }
+}
+```
+
+`rating.average` is `null` when there are no reviews — not `0`.
+`seller.verified` is derived from KYC status and exposes no verification detail.
+
+`400 INVALID_PRICE_RANGE` when `minPrice > maxPrice`.
+
+### `GET /catalog/listings/:slug`
+
+Adds `reviews` to the listing (newest 20) and a sibling `related` array (up to
+4 from the same category).
+
+```json
+{
+  "listing": { "…": "…", "reviews": [
+    { "id": "…", "rating": 5, "body": "…", "createdAt": "…", "authorName": "Noah Brenner" }
+  ] },
+  "related": [ { /* listing */ } ]
+}
+```
+
+`404 NOT_FOUND` if the slug is unknown, unpublished, or soft-deleted.
+
+---
+
+## Seller — `/seller` 🔒🏪
+
+Non-sellers receive `403 NOT_A_SELLER`.
+
+Every route is scoped to the caller's own records. **A listing owned by another
+seller returns 404, not 403** — a 403 would confirm the id exists.
+
+### `GET /seller/me`
+
+```json
+{ "seller": { "id": "…", "shopName": "…", "bio": null,
+              "kycStatus": "UNSTARTED", "payoutsEnabled": false, "createdAt": "…" },
+  "counts": { "DRAFT": 2, "ACTIVE": 5 } }
+```
+
+### `GET /seller/listings`
+
+All of the caller's listings, any status, newest-updated first. Excludes
+soft-deleted.
+
+### `GET /seller/listings/:id`
+
+### `POST /seller/listings`
+
+```json
+{
+  "title": "Walnut side table",
+  "description": "At least 10 characters.",
+  "categoryId": "<uuid>",
+  "condition": "GOOD",
+  "conditionNote": "Water ring",
+  "priceCents": 8500,
+  "originalPriceCents": 11000,
+  "quantity": 1,
+  "currency": "USD"
+}
+```
+
+Constraints: `title` 3–120, `description` 10–4000, `conditionNote` ≤ 60,
+`priceCents` ≥ 1, `quantity` 1–999, and `originalPriceCents` must exceed
+`priceCents`.
+
+Created as `DRAFT`. `slug` is derived from the title and fixed thereafter.
+
+`201` → `{ "listing": { ... } }`
+
+### `PATCH /seller/listings/:id`
+
+Accepts any subset of the create body. The `slug` is **not** regenerated when
+the title changes. `409 LISTING_SOLD` if the listing is sold.
+
+### `POST /seller/listings/:id/publish`
+
+`DRAFT` → `ACTIVE`.
+
+| Failure | Code |
+| --- | --- |
+| No photos | `NEEDS_PHOTO` |
+| Already sold | `LISTING_SOLD` |
+
+Deliberately **not** gated on identity verification
+([ADR 0007](adr/0007-verification-gates-payouts.md)).
+
+### `POST /seller/listings/:id/unpublish`
+
+`ACTIVE` → `DRAFT`.
+
+### `DELETE /seller/listings/:id`
+
+Soft delete: sets `deletedAt` and `status = REMOVED`. `204`.
+
+### `POST /seller/listings/:id/images`
+
+`multipart/form-data`, field name `image`. JPEG, PNG, or WebP; max 8 MB; max 8
+images per listing; 30 uploads per user per hour.
+
+The file is validated by **magic bytes** (not extension or `Content-Type`) and
+re-encoded to WebP, which strips EXIF including GPS.
+
+`201` → `{ "image": { "id": "…", "url": "…", "alt": "…", "position": 0 } }`
+
+| Failure | Code |
+| --- | --- |
+| Not a real image | `INVALID_IMAGE` |
+| Over 8 MB / unreadable upload | `UPLOAD_FAILED` |
+| Nothing attached | `NO_FILE` |
+| Already 8 images | `TOO_MANY_IMAGES` |
+| Hourly cap hit | `RATE_LIMITED` |
+
+### `DELETE /seller/listings/:id/images/:imageId`
+
+`204`. Returns `400 NEEDS_PHOTO` when removing the only photo of a published
+listing.
+
+---
+
+## Static files
+
+### `GET /uploads/:key`
+
+Processed seller images. Keys are server-generated (32 hex + extension) and
+served immutable with a one-year cache, since they are never reused.
+
+In development Next.js needs `images.dangerouslyAllowLocalIP` to optimise these,
+because Next 16 blocks image optimisation from private IPs as SSRF protection.
+It is scoped to development only — in production these come from object storage
+on a public hostname.

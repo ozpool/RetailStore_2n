@@ -5,6 +5,7 @@ import express from "express";
 import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
+import { assertKycConfigured } from "./lib/kycProvider";
 import { assertMailConfigured } from "./lib/mailer";
 
 const app = express();
@@ -23,8 +24,10 @@ app.get("/health", (_req, res) => {
 app.use("/auth", authRouter);
 app.use("/catalog", catalogRouter);
 app.use("/seller", sellerRouter);
+let kycSummary: string;
 let mailSummary: string;
 try {
+  kycSummary = assertKycConfigured();
   mailSummary = assertMailConfigured();
 } catch (err) {
   console.error(`\nConfiguration error:\n  ${(err as Error).message}\n`);
@@ -33,5 +36,6 @@ try {
 
 app.listen(PORT, () => {
   console.log(`RetailStore_2n backend listening on http://localhost:${PORT}`);
+  console.log(`Identity: ${kycSummary}`);
   console.log(`Email:    ${mailSummary}`);
 });

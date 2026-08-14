@@ -81,8 +81,34 @@ model SellerProfile {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   listings    Listing[]
+  kycAttempts KycAttempt[]
 
   @@map("seller_profiles")
+}
+
+/// Audit trail of identity-verification attempts. Identity checks are exactly
+/// the kind of decision that has to be explainable after the fact, so each
+/// attempt is retained rather than overwritten — SellerProfile keeps only the
+/// current state for fast reads.
+///
+/// Like SellerProfile, this stores a REFERENCE to the provider's decision and
+/// never any part of the document: no image, no document number, no date of
+/// birth. Those pass through memory and are discarded.
+model KycAttempt {
+  id                String             @id @default(uuid())
+  sellerProfileId   String
+  sellerProfile     SellerProfile      @relation(fields: [sellerProfileId], references: [id], onDelete: Cascade)
+  provider          String
+  providerSessionId String             @unique
+  status            VerificationStatus @default(PENDING)
+  documentType      String?
+  country           String?
+  rejectionReason   String?
+  createdAt         DateTime           @default(now())
+  completedAt       DateTime?
+
+  @@index([sellerProfileId])
+  @@map("kyc_attempts")
 }
 
 model Category {

@@ -7,6 +7,7 @@ import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertMailConfigured } from "./lib/mailer";
+import { sellerVerificationRouter } from "./routes/sellerVerification";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -23,6 +24,10 @@ app.get("/health", (_req, res) => {
 
 app.use("/auth", authRouter);
 app.use("/catalog", catalogRouter);
+// Verification and sales are mounted before the listing router so their paths
+// aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
+// anything it pattern-matches.
+app.use("/seller", sellerVerificationRouter);
 app.use("/seller", sellerRouter);
 let kycSummary: string;
 let mailSummary: string;

@@ -406,6 +406,68 @@ listing.
 
 ---
 
+## Verification & payouts — `/seller` 🔒🏪
+
+### `GET /seller/verification`
+
+```json
+{
+  "verification": {
+    "status": "REJECTED", "provider": "stub",
+    "documentType": "drivers_license", "country": "GB",
+    "verifiedAt": null,
+    "rejectionReason": "The document image couldn't be read clearly.",
+    "payoutsEnabled": false,
+    "isStub": true
+  },
+  "attempts": [ { "id": "…", "provider": "stub", "providerSessionId": "…",
+                  "status": "REJECTED", "documentType": "drivers_license",
+                  "country": "GB", "rejectionReason": "…",
+                  "createdAt": "…", "completedAt": "…" } ]
+}
+```
+
+`isStub` is exposed so the UI can say no real check occurred. Up to 10 attempts
+are returned, newest first.
+
+### `POST /seller/verification`
+
+Starts a session, or resumes an in-flight one rather than creating a duplicate.
+Max 5 per hour.
+
+`201` → `{ "session": { "providerSessionId": "…", "redirectUrl": "…" }, "resumed": false }`
+`200` → same shape with `"resumed": true` when an open session already exists.
+
+`409 ALREADY_VERIFIED` once verified.
+
+### `POST /seller/verification/:sessionId/submit`
+
+```json
+{ "documentType": "passport", "country": "US", "documentNumber": "…" }
+```
+
+`documentType` ∈ `passport` | `drivers_license` | `national_id`; `country` is a
+2-letter code (normalised to uppercase); `documentNumber` is 6–40 characters.
+
+> **`documentNumber` is never stored.** It is evaluated and discarded — not
+> persisted, not logged, not returned.
+> → [ADR 0006](adr/0006-kyc-store-reference-not-document.md)
+
+Stub outcomes: number ending `0000` → rejected (unreadable), `0001` → rejected
+(name mismatch), anything else → verified.
+
+`200` → `{ "outcome": "VERIFIED", "rejectionReason": null, "payoutsEnabled": true }`
+
+| Failure | Code |
+| --- | --- |
+| Unknown session, or another seller's | `NOT_FOUND` (404) |
+| Session already resolved | `SESSION_CLOSED` (409) |
+
+With a real provider this transition would arrive as a signature-verified
+webhook rather than a client submission.
+
+---
+
 ## Static files
 
 ### `GET /uploads/:key`

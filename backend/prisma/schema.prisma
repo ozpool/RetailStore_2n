@@ -34,6 +34,15 @@ enum VerificationStatus {
   REJECTED
 }
 
+/// A hold placed on stock while a buyer completes checkout.
+/// HELD is the only state that consumes availability.
+enum ReservationStatus {
+  HELD
+  RELEASED
+  CONVERTED
+  EXPIRED
+}
+
 model User {
   id                 String                   @id @default(uuid())
   email              String                   @unique
@@ -51,7 +60,37 @@ model User {
   verificationTokens EmailVerificationToken[]
   sellerProfile      SellerProfile?
   reviews            Review[]
+  reservations       Reservation[]
   @@map("users")
+}
+
+/// A time-limited hold on a listing's stock, taken before checkout.
+///
+/// This exists because almost everything here is quantity 1, so the hard
+/// problem is not counting stock — it is making sure two buyers can never both
+/// claim the same object. Availability is decided under a row lock on the
+/// listing; see docs/adr/0012-row-locking-for-reservations.md
+model Reservation {
+  id         String            @id @default(uuid())
+  listingId  String
+  listing    Listing           @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quantity   Int
+  status     ReservationStatus @default(HELD)
+  /// Holds are deliberately short-lived so abandoned checkouts return stock.
+  expiresAt  DateTime
+  createdAt  DateTime          @default(now())
+  releasedAt DateTime?
+
+  /// A partial unique index enforces one HELD hold per buyer per listing.
+  /// Prisma can't express `WHERE status = 'HELD'`, so it's added by hand in the
+  /// migration — a plain @@unique would also constrain RELEASED rows and stop a
+  /// buyer ever re-reserving the same item.
+  @@index([listingId, status])
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("reservations")
 }
 
 /// One-to-one with User, created when someone starts selling. Kept separate
@@ -168,6 +207,7 @@ model Listing {
 
   images       ListingImage[]
   reviews      Review[]
+  reservations Reservation[]
 
   @@index([categoryId])
   @@index([sellerId])

@@ -41,6 +41,10 @@ model User {
   name               String
   isSeller           Boolean                  @default(false)
   emailVerified      Boolean                  @default(false)
+  /// Public URL of the processed avatar, or null to fall back to initials.
+  /// The image itself lives in object storage, never in this database —
+  /// see docs/adr/0011-avatars-in-object-storage.md
+  avatarUrl          String?
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   refreshTokens      RefreshToken[]

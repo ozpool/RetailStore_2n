@@ -9,6 +9,8 @@ import { sellerRouter } from "./routes/seller";
 import { profileRouter } from "./routes/profile";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertMailConfigured } from "./lib/mailer";
+import { startReservationSweeper } from "./lib/reservations";
+import { reservationsRouter } from "./routes/reservations";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
 
 const app = express();
@@ -52,6 +54,7 @@ app.get("/health", (_req, res) => {
 app.use("/auth", authRouter);
 app.use("/catalog", catalogRouter);
 app.use("/profile", profileRouter);
+app.use("/reservations", reservationsRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.
@@ -85,4 +88,9 @@ app.listen(PORT, () => {
       console.error(`Uploads:  OBJECT STORE UNREACHABLE — ${(err as Error).message}`);
       console.error("          Photo uploads will fail until this is fixed.");
     });
+
+  // Expired holds must be returned to stock by something other than a new
+  // reservation attempt: a fully-held listing is hidden from the catalog, so no
+  // buyer can trigger the lazy reclaim for it.
+  startReservationSweeper();
 });

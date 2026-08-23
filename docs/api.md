@@ -344,6 +344,50 @@ Adds `reviews` to the listing (newest 20) and a sibling `related` array (up to
 
 ---
 
+## Reservations — `/reservations` 🔒
+
+A short-lived hold on stock, taken before checkout exists to convert it. This is
+where the oversell race is prevented: availability is decided inside a
+transaction holding `SELECT … FOR UPDATE` on the listing row, so two buyers can
+never both claim the same unique item.
+→ [ADR 0012](adr/0012-row-locking-for-reservations.md)
+
+### `GET /reservations`
+
+Your live holds, newest first, plus `holdMinutes` (currently 15).
+
+### `POST /reservations`
+
+```json
+{ "listingId": "<id>", "quantity": 1 }
+```
+
+`201` → `{ "reservation": { "id", "listingId", "quantity", "expiresAt", "remainingQuantity" } }`
+
+Stock is decremented and the listing flips to `RESERVED` once it reaches zero —
+distinct from `SOLD`, because no money has moved.
+
+| Failure | Code | Status |
+| --- | --- | --- |
+| Nothing left | `INSUFFICIENT_STOCK` | 409 |
+| Sold, draft, or removed | `UNAVAILABLE` | 409 |
+| You already hold it | `ALREADY_HELD` | 409 |
+| It's your own listing | `OWN_LISTING` | 400 |
+| Unknown listing | `NOT_FOUND` | 404 |
+
+**Losing a race is a 409, not a 500.** Contention is an expected outcome.
+
+### `DELETE /reservations/:id`
+
+Releases the hold and returns the stock, flipping the listing back to `ACTIVE`.
+`204`.
+
+Holds also expire on their own after 15 minutes, and expired stock is reclaimed
+lazily the next time someone tries to reserve that listing — so correctness
+doesn't depend on a background job.
+
+---
+
 ## Seller — `/seller` 🔒🏪
 
 Non-sellers receive `403 NOT_A_SELLER`.

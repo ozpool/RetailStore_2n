@@ -2,9 +2,11 @@ import "dotenv/config";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import { UPLOAD_DIR, assertStorage, storageDriver } from "./lib/storage";
 import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
+import { profileRouter } from "./routes/profile";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertMailConfigured } from "./lib/mailer";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
@@ -18,12 +20,38 @@ app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
+/**
+ * Uploaded images, when they are on this container's disk.
+ *
+ * Keys are random and never reused, so a long immutable cache is safe.
+ * `dotfiles: deny` and `index: false` keep this from serving anything other
+ * than the files we wrote.
+ *
+ * MOUNTED ONLY FOR THE DISK DRIVER. Under object storage the browser fetches
+ * objects from the store directly and this route would serve an empty
+ * directory — answering 404 for images that exist, which is a worse failure
+ * than not having the route at all, because it looks like the upload broke.
+ */
+if (storageDriver() === "disk") {
+  app.use(
+    "/uploads",
+    express.static(UPLOAD_DIR, {
+      maxAge: "1y",
+      immutable: true,
+      index: false,
+      dotfiles: "deny",
+      fallthrough: false,
+    })
+  );
+}
+
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "retailstore-2n-backend" });
 });
 
 app.use("/auth", authRouter);
 app.use("/catalog", catalogRouter);
+app.use("/profile", profileRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.
@@ -43,4 +71,18 @@ app.listen(PORT, () => {
   console.log(`RetailStore_2n backend listening on http://localhost:${PORT}`);
   console.log(`Identity: ${kycSummary}`);
   console.log(`Email:    ${mailSummary}`);
+
+  /**
+   * Also not fatal, and also printed loudly.
+   *
+   * A misconfigured bucket has no symptom until a seller uploads a photo and
+   * gets an error, or worse, uploads one that silently 404s in the page. One
+   * line at boot beats discovering it from a support message.
+   */
+  assertStorage()
+    .then((summary) => console.log(`Uploads:  ${summary}`))
+    .catch((err) => {
+      console.error(`Uploads:  OBJECT STORE UNREACHABLE — ${(err as Error).message}`);
+      console.error("          Photo uploads will fail until this is fixed.");
+    });
 });

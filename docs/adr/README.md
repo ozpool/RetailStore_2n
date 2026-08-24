@@ -29,6 +29,7 @@ the old one, rather than an edit.
 | [0010](0010-strip-image-metadata.md) | Re-encode uploads to strip EXIF | Accepted |
 | [0011](0011-avatars-in-object-storage.md) | Avatars in object storage, referenced by URL | Accepted |
 | [0012](0012-row-locking-for-reservations.md) | Row-level locking for stock reservations | Accepted |
+| [0013](0013-payment-provider-seam.md) | Payment provider seam; claim-then-charge over a distributed lock | Accepted |
 
 
 ## Adding one

@@ -43,6 +43,24 @@ enum ReservationStatus {
   EXPIRED
 }
 
+/// PENDING_PAYMENT and PROCESSING keep stock committed. Anything else has
+/// either taken the money or given the stock back.
+///
+/// PROCESSING is the mutual-exclusion mechanism for payment. A request claims
+/// the order by moving it PENDING_PAYMENT -> PROCESSING in one conditional
+/// UPDATE; only the request whose UPDATE matched a row may call the provider.
+/// Without it, two concurrent clicks both read PENDING_PAYMENT, both pass the
+/// status check, and both charge the card.
+/// See docs/adr/0013-payment-provider-seam.md
+enum OrderStatus {
+  PENDING_PAYMENT
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
 model User {
   id                 String                   @id @default(uuid())
   email              String                   @unique
@@ -61,6 +79,8 @@ model User {
   sellerProfile      SellerProfile?
   reviews            Review[]
   reservations       Reservation[]
+
+  orders            Order[]
   @@map("users")
 }
 
@@ -208,6 +228,7 @@ model Listing {
   images       ListingImage[]
   reviews      Review[]
   reservations Reservation[]
+  orderItems   OrderItem[]
 
   @@index([categoryId])
   @@index([sellerId])
@@ -275,4 +296,61 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+/// A purchase. Created from the buyer's live holds, so the stock is already
+/// committed before payment is attempted — the alternative is telling someone
+/// their item is gone after they have paid.
+model Order {
+  id        String      @id @default(uuid())
+  /// Short human-facing reference for support conversations.
+  reference String      @unique
+  buyerId   String
+  buyer     User        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  status    OrderStatus @default(PENDING_PAYMENT)
+
+  /// Integer minor units, like every other money column here.
+  subtotalCents Int
+  currency      String @default("USD")
+
+  /// A REFERENCE to the payment, never card data. Same reasoning as the KYC
+  /// fields: the provider holds anything sensitive.
+  /// See docs/adr/0013-payment-provider-seam.md
+  paymentProvider String?
+  paymentIntentId String?   @unique
+  paidAt          DateTime?
+  failureReason   String?
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  items     OrderItem[]
+
+  @@index([buyerId])
+  @@index([status])
+  @@map("orders")
+}
+
+/// One line of an order.
+///
+/// Title, price, and seller are SNAPSHOTS taken at purchase time, not lookups.
+/// A seller can rename or reprice a listing afterwards, and an order has to keep
+/// saying what was actually bought for what — otherwise order history silently
+/// rewrites itself.
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Kept so the buyer can still reach the product page. Nullable because a
+  /// listing may later be hard-deleted, and the order must survive that.
+  listingId String?
+  listing   Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  title          String
+  unitPriceCents Int
+  quantity       Int
+  sellerName     String
+
+  @@index([orderId])
+  @@map("order_items")
 }

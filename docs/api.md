@@ -546,6 +546,150 @@ webhook rather than a client submission.
 
 ---
 
+## Orders — `/orders` 🔒
+
+→ [ADR 0013](adr/0013-payment-provider-seam.md)
+
+### `POST /orders`
+Converts live holds into an order and opens a payment intent.
+
+```json
+{ "addressId": "uuid" }   // optional — omitted means "use my default"
+```
+
+`400 NO_ADDRESS` if the buyer has none. The UI treats this as a missing step and
+routes to the address form rather than showing an error.
+
+The response order carries `shipTo` — the address **as it was that day**.
+
+### `GET /orders` · `GET /orders/:id`
+Scoped to the buyer. Someone else's order is a 404.
+
+Each item carries its own `fulfilment`, `carrier`, `trackingNumber`,
+`shippedAt`, `deliveredAt`, and `fulfilmentNote`. Fulfilment is per line because
+a basket can span several sellers, and two sellers cannot share one parcel —
+so "your order has shipped" is not something that can honestly be said about a
+whole order.
+
+### `POST /orders/:id/pay`
+```json
+{ "cardNumber": "4242424242424242" }
+```
+Claims the order atomically before contacting the provider. Concurrent calls get
+`409 PAYMENT_IN_PROGRESS` or `409 ALREADY_PAID` — never a second charge.
+
+### `GET /orders/refunds` 🔒
+
+Every refund this buyer has received, newest first (max 100).
+
+```json
+{ "refunds": [ {
+  "id": "…", "amountCents": 3200, "currency": "USD",
+  "status": "SUCCEEDED", "trigger": "SELLER_UNFULFILLABLE",
+  "reason": "Cracked while I was packing it.",
+  "createdAt": "…", "completedAt": "…",
+  "orderId": "…", "orderReference": "RS2-W9ABBM",
+  "itemTitle": "Cast iron skillet"
+} ] }
+```
+
+Declared **before** `/:id` in the router — Express matches in order, so swapped
+it would read as an order whose id is the string `refunds`.
+
+`itemTitle` comes from the line's snapshot, so it survives the listing being
+deleted — a likely outcome for something a seller could not send.
+
+### Returns
+
+A buyer asking for their money back on one line. A **request** the seller
+answers, not a refund — approving one produces an ordinary `Refund` with the
+`BUYER_RETURN` trigger, so the over-refund guard, the provider call, webhook
+settlement and the payout reversal all apply unchanged.
+[ADR 0031](adr/0031-buyer-initiated-returns.md).
+
+```
+OPEN ──approve──> APPROVED (a Refund exists)
+     ──refuse───> REFUSED ──escalate──> ESCALATED ──> APPROVED | REJECTED
+     ──withdraw─> WITHDRAWN
+```
+
+The window derives from `PAYOUT_HOLD_DAYS` unless `RETURN_WINDOW_DAYS` overrides
+it. A window longer than the payout hold means every late return lands on money
+already transferred, so the two are consistent by default and the boot banner
+says so when they are not.
+
+#### `GET /orders/items/:itemId/return`
+
+Whether the line can be returned. **`eligible: false` is a 200**, because "the
+window closed on the 14th" is an answer rather than an error — the page shows it
+instead of offering a button that would fail.
+
+```json
+{ "eligible": true, "title": "A mended plate", "amountCents": 6400,
+  "deadline": "2026-09-16T…", "windowDays": 7 }
+```
+
+| Refusal | Code |
+| --- | --- |
+| Order never paid | `ORDER_NOT_PAID` |
+| Buyer hasn't confirmed delivery | `NOT_DELIVERED` |
+| Past the window (carries `deadline`) | `WINDOW_CLOSED` |
+| Already refunded — including a fully refunded order | `ALREADY_REFUNDED` |
+| A request already exists | `ALREADY_REQUESTED` |
+
+Somebody else's line is a **404**, not a refusal: distinguishing them turns an
+id into a way to ask what another person bought.
+
+#### `POST /orders/items/:itemId/return`
+
+```json
+{ "reason": "The rim is chipped and it wasn't in the photos.",
+  "notAsDescribed": true }
+```
+
+`reason` needs 10 characters — the seller reads it verbatim and has to be able
+to act on it. `notAsDescribed` is recorded because it is what would decide who
+pays return postage; nothing acts on it yet.
+
+`201` → `{ "id": "…", "deadline": "…" }`
+
+The insert is the claim: `return_requests.orderItemId` is unique, so a double
+tap collides on the constraint rather than opening two rival requests against
+one line. Rate limited to **20 per hour per buyer** — each one is a message a
+seller has to read.
+
+#### `POST /orders/returns/:id/withdraw` · `POST /orders/returns/:id/escalate`
+
+Withdraw works only from `OPEN`; once somebody has answered, withdrawing would
+erase their answer. Escalate works only from `REFUSED` — it is not a way past
+the seller, who has to have said no first. **Nothing escalates on a timer**:
+there is no scheduler here, so a seller's silence is answered by the buyer
+pressing this rather than by a deadline.
+
+Another buyer's return is a `404`. Wrong state is `409 WRONG_STATE`.
+
+#### `GET /orders/returns`
+
+Every return this buyer has asked for, with the item named, the buyer's own
+words, and the answer verbatim if there is one. Also returns `windowDays`, so
+nothing in the UI hardcodes it.
+
+---
+
+### `POST /orders/:id/cancel`
+Only while `PENDING_PAYMENT`. A `PROCESSING` order returns
+`409 PAYMENT_IN_PROGRESS`, because returning stock while a charge may complete
+risks selling an item someone has paid for.
+
+### `POST /orders/items/:itemId/delivered`
+The **buyer** confirms arrival. Deliberately not the seller's call: a seller
+marking their own parcel delivered is not evidence of anything — and this is
+what releasing money hangs on, because `deliveredAt` starts the seven-day payout
+hold ([ADR 0030](adr/0030-payout-eligibility-and-hold.md)). A seller who could
+call this would be starting their own payment clock. Idempotent.
+
+---
+
 ## Static files
 
 ### `GET /uploads/:key`

@@ -7,9 +7,12 @@ import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
 import { profileRouter } from "./routes/profile";
+import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
+import { assertProviderConfigured } from "./lib/paymentProvider";
 import { assertMailConfigured } from "./lib/mailer";
 import { startReservationSweeper } from "./lib/reservations";
+import { ordersRouter } from "./routes/orders";
 import { reservationsRouter } from "./routes/reservations";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
 
@@ -55,14 +58,23 @@ app.use("/auth", authRouter);
 app.use("/catalog", catalogRouter);
 app.use("/profile", profileRouter);
 app.use("/reservations", reservationsRouter);
+app.use("/orders", ordersRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.
 app.use("/seller", sellerVerificationRouter);
 app.use("/seller", sellerRouter);
+
+/**
+ * Fail before binding the port, not at the first checkout. A missing Stripe key
+ * discovered mid-payment is one broken customer; discovered here it is a
+ * one-line startup error.
+ */
+let paymentSummary: string;
 let kycSummary: string;
 let mailSummary: string;
 try {
+  paymentSummary = assertProviderConfigured();
   kycSummary = assertKycConfigured();
   mailSummary = assertMailConfigured();
 } catch (err) {
@@ -72,6 +84,7 @@ try {
 
 app.listen(PORT, () => {
   console.log(`RetailStore_2n backend listening on http://localhost:${PORT}`);
+  console.log(`Payments: ${paymentSummary}`);
   console.log(`Identity: ${kycSummary}`);
   console.log(`Email:    ${mailSummary}`);
 
@@ -93,4 +106,10 @@ app.listen(PORT, () => {
   // reservation attempt: a fully-held listing is hidden from the catalog, so no
   // buyer can trigger the lazy reclaim for it.
   startReservationSweeper();
+
+  // Two jobs, same reasoning as above — both recover state that nothing in the
+  // request path can reach:
+  //   unpaid orders hold stock, and their listing is hidden from the catalog
+  //   in-flight payments whose request died need settling against the provider
+  startOrderSweeper();
 });

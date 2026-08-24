@@ -16,6 +16,7 @@ import { ordersRouter } from "./routes/orders";
 import { reservationsRouter } from "./routes/reservations";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
 import { webhooksRouter } from "./routes/webhooks";
+import { wishlistRouter } from "./routes/wishlist";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -70,6 +71,7 @@ app.use("/catalog", catalogRouter);
 app.use("/profile", profileRouter);
 app.use("/reservations", reservationsRouter);
 app.use("/orders", ordersRouter);
+app.use("/wishlist", wishlistRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.

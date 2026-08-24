@@ -690,6 +690,25 @@ call this would be starting their own payment clock. Idempotent.
 
 ---
 
+## Webhooks — `/webhooks/stripe`
+
+Signature-verified, raw body, mounted **before** `express.json()` — Stripe signs
+the exact bytes, so a parsed and re-serialised body fails every time.
+
+Handles `payment_intent.*`, `refund.*` / `charge.refund.updated`, and
+`identity.verification_session.*`. Note that `requires_input` means both
+"hasn't started" and "was refused"; only `last_error` separates them.
+
+`charge.refunded` is deliberately **not** handled. It fires alongside the
+refund-object events but carries a Charge, whose `refunds` list would need
+separate unwrapping — two code paths for one fact, the second only ever
+agreeing with the first.
+
+Unknown events and unknown ids return **200**, because a non-2xx tells Stripe to
+retry forever.
+
+---
+
 ## Static files
 
 ### `GET /uploads/:key`

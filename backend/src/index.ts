@@ -15,12 +15,23 @@ import { startReservationSweeper } from "./lib/reservations";
 import { ordersRouter } from "./routes/orders";
 import { reservationsRouter } from "./routes/reservations";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
+import { webhooksRouter } from "./routes/webhooks";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:3000";
 
 app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+
+/**
+ * Mounted BEFORE express.json(), because Stripe signs the raw request bytes.
+ * If the JSON parser reaches the body first, it is re-serialised and every
+ * signature check fails. This is the single most common way webhook
+ * verification gets broken, so the ordering here is load-bearing.
+ *
+ * No CSRF concern: webhooks are cookie-less and authenticated by signature.
+ */
+app.use("/webhooks", webhooksRouter);
 
 app.use(express.json());
 app.use(cookieParser());

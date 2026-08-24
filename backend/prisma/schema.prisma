@@ -81,7 +81,33 @@ model User {
   reservations       Reservation[]
 
   orders            Order[]
+  wishlist          WishlistItem[]
   @@map("users")
+}
+
+/// A saved listing.
+///
+/// Deliberately the opposite of a Reservation: no quantity, no expiry, and no
+/// effect whatsoever on availability. Saving something must never take it out
+/// of the shop, or two people saving the same chair would each think they had
+/// claimed it.
+///
+/// The compound unique is what makes saving idempotent — a double-tapped heart,
+/// or the same listing opened in two tabs, cannot produce two rows. The app
+/// relies on that rather than checking first and inserting after, which is the
+/// same read-then-write race as ADR 0012.
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, listingId])
+  /// Ordered newest-first per user, which is the only way this is ever read.
+  @@index([userId, createdAt])
+  @@map("wishlist_items")
 }
 
 /// A time-limited hold on a listing's stock, taken before checkout.
@@ -229,6 +255,7 @@ model Listing {
   reviews      Review[]
   reservations Reservation[]
   orderItems   OrderItem[]
+  wishlistedBy WishlistItem[]
 
   @@index([categoryId])
   @@index([sellerId])

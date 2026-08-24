@@ -690,6 +690,21 @@ call this would be starting their own payment clock. Idempotent.
 
 ---
 
+## Wishlist — `/wishlist` 🔒
+
+Saving is **inert**: it never reserves, hides, or changes what anyone else sees.
+Two people can save the same one-of-a-kind chair and neither has claimed it.
+
+- `GET /wishlist` — full entries. Sold items stay on the list, flagged `sold`,
+  rather than vanishing.
+- `GET /wishlist/ids` — ids only, for drawing a grid of hearts in one request.
+- `PUT /wishlist/:listingId` — idempotent, via a unique index on
+  `(userId, listingId)`. Six simultaneous saves produce one row.
+- `DELETE /wishlist/:listingId` — removing something not saved is a success, not
+  a 404.
+
+---
+
 ## Webhooks — `/webhooks/stripe`
 
 Signature-verified, raw body, mounted **before** `express.json()` — Stripe signs

@@ -546,6 +546,42 @@ webhook rather than a client submission.
 
 ---
 
+## Addresses — `/addresses` 🔒
+
+Where orders get delivered. Checkout requires one.
+
+Deleted entries are soft-deleted, and **past orders never reference these rows at
+all** — an order copies the fields onto itself at checkout. Editing or deleting
+an address must not change where a past parcel was sent.
+
+### `GET /addresses`
+Your addresses, default first then newest.
+
+### `POST /addresses`
+```json
+{ "fullName": "…", "line1": "…", "line2": null, "city": "…",
+  "region": null, "postcode": "…", "country": "GB", "phone": null,
+  "isDefault": false }
+```
+`country` is ISO 3166-1 alpha-2. Everything else is deliberately loose —
+address formats differ enough between countries that strict validation rejects
+more real addresses than it catches bad ones.
+
+The **first** address saved becomes the default whether or not `isDefault` was
+sent, so checkout always has something to preselect.
+
+`409 TOO_MANY` past 20 addresses.
+
+### `PATCH /addresses/:id` · `DELETE /addresses/:id`
+Scoped to the owner; someone else's address is a **404, not a 403**.
+Deleting the default promotes the next most recent, rather than leaving a buyer
+with addresses but no default.
+
+### `POST /addresses/:id/default`
+Exactly one default at a time, swapped inside a transaction.
+
+---
+
 ## Orders — `/orders` 🔒
 
 → [ADR 0013](adr/0013-payment-provider-seam.md)
@@ -689,6 +725,91 @@ hold ([ADR 0030](adr/0030-payout-eligibility-and-hold.md)). A seller who could
 call this would be starting their own payment clock. Idempotent.
 
 ---
+
+## Sales — `/seller/sales` 🔒🏪
+
+What a seller has sold. Previously impossible to ask: order lines carried a
+`sellerName` *string* and nothing queryable, so a seller could never see their
+own orders.
+
+### `GET /seller/sales?filter=all|to_send|sent`
+
+Only `PAID` orders appear. An unpaid checkout is never shown — sellers should
+not pack parcels for carts that get abandoned, and the buyer's address is
+released at the same moment, not before.
+
+```json
+{ "sales": [ { "id": "…", "title": "…", "order": { "reference": "RS2-…" },
+              "fulfilment": "UNFULFILLED", "shipTo": { "line1": "…" } } ],
+  "summary": { "toSend": 1, "shipped": 0, "delivered": 0, "grossCents": 4200 } }
+```
+
+`grossCents` is named gross on purpose, and it stayed that way once payouts
+were built. It is the total of what sold, before the hold and before any
+refund — so it is not what the seller is owed. What they are owed, line by
+line, is [`GET /seller/payouts`](#get-sellerpayouts), and calling this one
+earnings would put two different numbers under one word.
+
+### `POST /seller/sales/:id/ship`
+```json
+{ "carrier": "Royal Mail", "trackingNumber": "RM…" }
+```
+Both optional — plenty of secondhand sales are handed over in person or posted
+without a trackable service, and demanding a number pushes sellers into
+inventing one. Idempotent: shipping twice updates the tracking rather than
+erroring.
+
+### `POST /seller/sales/:id/cannot-send`
+```json
+{ "reason": "Broke while I was packing it, sorry." }
+```
+Refunds that line automatically, for exactly what was paid for it — not the
+whole order, since a basket can span sellers and one seller failing to post says
+nothing about the others. The refund is attributed to the seller rather than to
+a moderator, carries their stated reason, and notifies the buyer that the money
+is on its way back. See [ADR 0016](adr/0016-refunds-claim-then-refund.md).
+
+`200` → `{ "ok": true, "refunded": true, "refundCents": 4200,
+"refundStatus": "SUCCEEDED", "refundError": null, "note": "…" }`
+
+**The outcome is reported, not assumed.** A provider can still refuse, so the
+seller is told which happened rather than reassured either way — `refunded:
+false` with a `refundError` means the buyer was told and the money was not
+sent, and the refund row is recorded for somebody to settle.
+
+---
+
+### `GET /seller/returns?filter=open`
+
+Returns against this seller's own lines, with the buyer's words and whether they
+called the item misdescribed. `filter=open` narrows to the ones still needing an
+answer.
+
+### `POST /seller/returns/:id/respond`
+
+```json
+{ "approve": true }
+{ "approve": false, "note": "The chip is visible in the third photo." }
+```
+
+**A refusal requires a note**, and the buyer sees it verbatim — refusing in
+silence would make escalating the only rational response every time.
+
+Approving issues the refund. If the provider refuses, the request is **put back
+to OPEN** and this answers `502 REFUND_FAILED`: a request left APPROVED with no
+refund behind it would tell the buyer their money was coming when nothing was
+owed to anyone.
+
+| Failure | Code |
+| --- | --- |
+| Another seller's return, or none | `NOT_FOUND` (404) |
+| Refusing with no note | `NOTE_REQUIRED` (400) |
+| Already answered, or escalated to a moderator | `WRONG_STATE` (409) |
+| The refund could not be issued — still open | `REFUND_FAILED` (502) |
+
+A seller **cannot** answer an `ESCALATED` request. That is the point of
+escalation, and only the admin route may.
+
 
 ## Wishlist — `/wishlist` 🔒
 

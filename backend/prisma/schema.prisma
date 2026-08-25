@@ -61,6 +61,25 @@ enum OrderStatus {
   REFUNDED
 }
 
+/// Whether an item has actually been sent.
+///
+/// DELIBERATELY SEPARATE FROM OrderStatus
+/// Payment and delivery are independent facts: an order is PAID *and*
+/// UNFULFILLED for as long as it takes the seller to reach a post office, and
+/// one enum cannot hold both. Folding them together is how systems end up with
+/// states like "PAID_BUT_ALSO_SHIPPED".
+///
+/// It lives on OrderItem rather than Order because a basket can span several
+/// sellers, and two sellers cannot share one parcel. Each line is fulfilled by
+/// whoever sold it.
+enum FulfilmentStatus {
+  UNFULFILLED
+  SHIPPED
+  DELIVERED
+  /// The seller could not send it. Distinct from a payment failure.
+  UNFULFILLABLE
+}
+
 model User {
   id                 String                   @id @default(uuid())
   email              String                   @unique
@@ -82,7 +101,50 @@ model User {
 
   orders            Order[]
   wishlist          WishlistItem[]
+  addresses         Address[]
   @@map("users")
+}
+
+/// Where someone's orders get delivered.
+///
+/// SOFT DELETE, AND SNAPSHOTS ON ORDERS
+/// This row is the buyer's *current* address book entry. It is never referenced
+/// by a past order — orders copy the fields onto themselves at checkout, the
+/// same way OrderItem copies title and price. Editing your address next year
+/// must not rewrite where a parcel was sent last year, and deleting it must not
+/// leave an order pointing at nothing.
+///
+/// Deleted entries are kept because the buyer may be mid-checkout when they
+/// press delete, and because a removed address is not something anyone needs to
+/// destroy.
+model Address {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Free-form on purpose. Address formats differ enough by country that
+  /// structured fields beyond this cause more bad data than they prevent.
+  fullName String
+  line1    String
+  line2    String?
+  city     String
+  /// State, province, or county. Optional — plenty of countries have no such thing.
+  region   String?
+  postcode String
+  /// ISO 3166-1 alpha-2.
+  country  String
+  phone    String?
+
+  /// At most one per user, enforced in the app inside a transaction — Prisma
+  /// cannot express a partial unique index on `isDefault = true`.
+  isDefault Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@map("addresses")
 }
 
 /// A saved listing.
@@ -171,6 +233,7 @@ model SellerProfile {
   updatedAt   DateTime     @updatedAt
   listings    Listing[]
   kycAttempts KycAttempt[]
+  sales       OrderItem[]
 
   @@map("seller_profiles")
 }
@@ -348,6 +411,23 @@ model Order {
   paidAt          DateTime?
   failureReason   String?
 
+  /// WHERE THIS WAS SENT — a snapshot, not a relation.
+  ///
+  /// Copied from the buyer's Address at checkout for the same reason
+  /// OrderItem copies title and price: they can edit or delete that address
+  /// afterwards, and an order has to keep saying where it actually went.
+  /// A foreign key would let last year's parcel silently move house.
+  ///
+  /// Nullable only because orders predating addresses exist.
+  shipToName     String?
+  shipToLine1    String?
+  shipToLine2    String?
+  shipToCity     String?
+  shipToRegion   String?
+  shipToPostcode String?
+  shipToCountry  String?
+  shipToPhone    String?
+
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
@@ -373,11 +453,36 @@ model OrderItem {
   listingId String?
   listing   Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
 
+  /// WHO SOLD IT.
+  ///
+  /// Without this a seller cannot answer "what did I sell?" — the line carried
+  /// only a `sellerName` string, which is a snapshot for display and not
+  /// something to query by. This was the single reason sellers were blind to
+  /// their own orders.
+  ///
+  /// Nullable and SetNull so closing a shop does not delete a buyer's receipt.
+  /// Going through the listing instead would not work: a listing can be
+  /// hard-deleted, and then the sale would lose its seller too.
+  sellerId String?
+  seller   SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+
   title          String
   unitPriceCents Int
   quantity       Int
   sellerName     String
 
+  /// Fulfilment is per line, because a basket can span several sellers and two
+  /// sellers cannot share one parcel.
+  fulfilment     FulfilmentStatus @default(UNFULFILLED)
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  carrier        String?
+  trackingNumber String?
+  /// Why the seller could not send it. Shown to the buyer verbatim.
+  fulfilmentNote String?
+
   @@index([orderId])
+  /// The seller sales view: their lines, newest first.
+  @@index([sellerId, fulfilment])
   @@map("order_items")
 }

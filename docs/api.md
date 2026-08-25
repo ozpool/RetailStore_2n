@@ -826,6 +826,26 @@ Two people can save the same one-of-a-kind chair and neither has claimed it.
 
 ---
 
+## Reports — `/reports` 🔒
+
+Anyone signed in can report a listing, a review, or an account.
+
+### `GET /reports/reasons`
+
+The list the UI renders. Codes are stable; labels are not.
+
+### `POST /reports`
+
+```json
+{ "targetType": "LISTING", "targetId": "uuid", "reason": "COUNTERFEIT", "detail": "optional" }
+```
+
+**409 `ALREADY_REPORTED`** if you have already reported that thing — one voice
+per person, so a queue cannot be brigaded by one account clicking repeatedly.
+**404** for a target that does not exist.
+
+---
+
 ## Webhooks — `/webhooks/stripe`
 
 Signature-verified, raw body, mounted **before** `express.json()` — Stripe signs

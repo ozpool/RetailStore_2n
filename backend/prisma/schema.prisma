@@ -61,6 +61,77 @@ enum OrderStatus {
   REFUNDED
 }
 
+/// What a notification is about.
+///
+/// Every value corresponds to something that ACTUALLY HAPPENED to this user —
+/// their item sold, their parcel moved, a decision landed on their account.
+/// Nothing here is marketing. A notification list that mixes "your order
+/// shipped" with "check out our new arrivals" trains people to ignore both.
+enum NotificationType {
+  /// Seller: someone bought your item.
+  SALE_MADE
+  /// Buyer: the seller has sent it.
+  ORDER_SHIPPED
+  /// Seller: the buyer confirmed it arrived.
+  ORDER_DELIVERED
+  /// Buyer: the seller cannot send it after all.
+  ORDER_UNFULFILLABLE
+  /// Seller: someone reviewed something you sold.
+  REVIEW_RECEIVED
+  IDENTITY_VERIFIED
+  IDENTITY_REJECTED
+  /// Moderation outcomes, addressed to whoever they affect.
+  LISTING_REMOVED
+  ACCOUNT_SUSPENDED
+  REPORT_RESOLVED
+}
+
+/// Who someone is on the platform.
+///
+/// A flag rather than a permissions table: there are two kinds of person here,
+/// and inventing a role system for two roles is how you end up maintaining one.
+enum UserRole {
+  USER
+  ADMIN
+}
+
+/// What a report is about. The target id is not a foreign key — a report must
+/// survive the thing it reported being deleted, which is often the outcome.
+enum ReportTargetType {
+  LISTING
+  USER
+  REVIEW
+}
+
+/// Constrained so reports can be triaged and counted. The reporter's own words
+/// go in Report.detail, which is what a moderator actually reads.
+enum ReportReason {
+  PROHIBITED_ITEM
+  COUNTERFEIT
+  MISLEADING_DESCRIPTION
+  SPAM
+  HARASSMENT
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  /// Looked at, nothing wrong. Distinct from RESOLVED so "we did nothing" is
+  /// recorded as a decision rather than looking like an unfinished queue item.
+  DISMISSED
+}
+
+/// What a moderator did, and why.
+enum ModerationActionType {
+  LISTING_REMOVED
+  LISTING_RESTORED
+  USER_SUSPENDED
+  USER_REINSTATED
+  REVIEW_REMOVED
+  REPORT_DISMISSED
+}
+
 /// Whether an item has actually been sent.
 ///
 /// DELIBERATELY SEPARATE FROM OrderStatus
@@ -98,11 +169,121 @@ model User {
   sellerProfile      SellerProfile?
   reviews            Review[]
   reservations       Reservation[]
+  /// Two kinds of person, so a flag rather than a permissions table.
+  role               UserRole                 @default(USER)
+
+  /// SUSPENSION, NOT DELETION
+  /// A suspended account cannot log in, but its listings, orders, and reviews
+  /// stay exactly where they are. Deleting a bad actor would also delete the
+  /// evidence, and would orphan the orders of people who bought from them in
+  /// good faith.
+  suspendedAt     DateTime?
+  /// Shown to them at the login screen. Vague suspensions are indistinguishable
+  /// from bugs, and generate support instead of preventing it.
+  suspendedReason String?
 
   orders            Order[]
   wishlist          WishlistItem[]
   addresses         Address[]
+  notifications     Notification[]
+  reportsMade       Report[]                 @relation("ReportsMade")
+  moderationActions ModerationAction[]       @relation("ModeratorActions")
+
+  @@index([role])
   @@map("users")
+}
+
+/// Something that happened to this user, worth telling them about.
+///
+/// IN-APP ONLY, BY CHOICE
+/// Email delivery exists (see lib/mailer.ts) but nothing here uses it. Sending
+/// mail for every sale, shipment, and moderation decision needs per-type
+/// preferences and an unsubscribe path first, or it becomes the reason people
+/// filter this domain to spam. This table stays the source of truth; when mail
+/// does go out, it reads from here rather than replacing it.
+///
+/// TITLE AND BODY ARE WRITTEN AT CREATION, NOT RENDERED LATER
+/// Same reasoning as OrderItem's snapshots: "Cast iron skillet sold" has to
+/// keep saying that after the listing is renamed, repriced, or deleted. A
+/// notification that re-derives its own text can quietly rewrite history, and
+/// a notification about a deleted thing would break entirely.
+model Notification {
+  id     String           @id @default(uuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+
+  title String
+  body  String?
+  /// Where to go when it's clicked. A plain path, so a moved route is a
+  /// dead link rather than a crash.
+  link  String?
+
+  /// Null means unread. A nullable timestamp rather than a boolean, because
+  /// "when did they see it" is worth having and costs nothing.
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  /// The unread badge, and the list. Both read by user.
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+/// Someone flagging something.
+///
+/// The target is a type plus a bare id, NOT a foreign key. A report has to
+/// survive the thing it reported being removed — which is frequently the whole
+/// point of the report — and three nullable FKs would be worse than one id.
+model Report {
+  id         String @id @default(uuid())
+  reporterId String
+  reporter   User   @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  targetType ReportTargetType
+  targetId   String
+  reason     ReportReason
+  /// The reporter's own words. This is what a moderator actually reads.
+  detail     String?
+
+  status     ReportStatus @default(OPEN)
+  resolution String?
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// One open report per person per thing, so a single upset user cannot
+  /// inflate a queue by reporting the same listing eleven times. Enforced in
+  /// the app: Prisma cannot express `WHERE status = 'OPEN'`.
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reporterId])
+  @@map("reports")
+}
+
+/// What a moderator did.
+///
+/// Retained rather than overwritten, for the same reason KycAttempt is: a
+/// decision to remove someone's listing or suspend their account has to be
+/// explainable afterwards, including when it was wrong.
+model ModerationAction {
+  id          String @id @default(uuid())
+  moderatorId String
+  moderator   User   @relation("ModeratorActions", fields: [moderatorId], references: [id], onDelete: Cascade)
+
+  action     ModerationActionType
+  targetType ReportTargetType
+  targetId   String
+  /// Free text. Shown to the affected user, so it has to be readable.
+  reason     String
+  /// The report this came from, if any. Direct actions have none.
+  reportId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("moderation_actions")
 }
 
 /// Where someone's orders get delivered.

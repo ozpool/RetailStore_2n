@@ -25,6 +25,7 @@ const SUITES: Suite[] = [
   { name: "wishlist", file: "api/wishlist.ts", kind: "api" },
   { name: "checkout-bff", file: "api/checkout-bff.ts", kind: "api" },
   { name: "addresses-sales", file: "api/addresses-and-sales.ts", kind: "api" },
+  { name: "notifications", file: "api/notifications.ts", kind: "api" },
   { name: "refresh", file: "api/refresh.ts", kind: "api" },
   { name: "uploads", file: "api/uploads.ts", kind: "api" },
   { name: "identity", file: "api/identity.ts", kind: "api" },

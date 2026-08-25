@@ -14,6 +14,8 @@ import { assertMailConfigured } from "./lib/mailer";
 import { startReservationSweeper } from "./lib/reservations";
 import { ordersRouter } from "./routes/orders";
 import { addressesRouter } from "./routes/addresses";
+import { notificationsRouter } from "./routes/notifications";
+import { reportsRouter } from "./routes/reports";
 import { reservationsRouter } from "./routes/reservations";
 import { salesRouter } from "./routes/sales";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
@@ -75,6 +77,8 @@ app.use("/reservations", reservationsRouter);
 app.use("/orders", ordersRouter);
 app.use("/wishlist", wishlistRouter);
 app.use("/addresses", addressesRouter);
+app.use("/notifications", notificationsRouter);
+app.use("/reports", reportsRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.

@@ -31,6 +31,7 @@ the old one, rather than an edit.
 | [0012](0012-row-locking-for-reservations.md) | Row-level locking for stock reservations | Accepted |
 | [0013](0013-payment-provider-seam.md) | Payment provider seam; claim-then-charge over a distributed lock | Accepted |
 | [0014](0014-one-order-fulfilment-per-line.md) | One order per basket, fulfilment per line; addresses snapshotted | Accepted |
+| [0015](0015-admin-by-cli-grant-and-step-up.md) | Admin granted only by CLI; step-up with TOTP to open the panel | Accepted |
 
 
 ## Adding one

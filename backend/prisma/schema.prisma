@@ -182,6 +182,37 @@ model User {
   /// from bugs, and generate support instead of preventing it.
   suspendedReason String?
 
+  /// TOTP, for admins only.
+  ///
+  /// WHY TOTP AND NOT SMS OR EMAIL
+  /// SMS is vulnerable to SIM-swap, which is a real attack against exactly the
+  /// kind of account that has admin rights. Emailed codes are only as strong as
+  /// the inbox — and the inbox is also where a password reset lands, so one
+  /// compromise would hand over both factors at once. TOTP depends on neither:
+  /// an authenticator app and a shared secret, stronger than both.
+  ///
+  /// The secret is stored raw because it has to be: verifying a code requires
+  /// recomputing it, so there is no hashed form that would still work. That is
+  /// a real limitation of TOTP, and the mitigation is that it is only ever set
+  /// for admin accounts, of which there should be very few.
+  totpSecret      String?
+  /// Null until a code has been entered correctly. An enrolment that was
+  /// started but never confirmed must not be treated as a second factor.
+  totpConfirmedAt DateTime?
+  /// REPLAY PROTECTION: the start of the 30-second period whose code was last
+  /// accepted.
+  ///
+  /// A TOTP code stays valid for about 90 seconds here, because one step either
+  /// side is allowed for clock drift. Without this column the same six digits
+  /// work repeatedly inside that window — so a code read over someone's
+  /// shoulder, or captured by a proxy that relays it, can be used a second time
+  /// by someone else.
+  ///
+  /// Any code from this period or earlier is refused, which makes each code
+  /// single-use. Stored as the period start rather than the moment of use so
+  /// the comparison is exact: two codes from the same period are the same code.
+  totpLastUsedAt  DateTime?
+
   orders            Order[]
   wishlist          WishlistItem[]
   addresses         Address[]

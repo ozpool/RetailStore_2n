@@ -846,6 +846,118 @@ per person, so a queue cannot be brigaded by one account clicking repeatedly.
 
 ---
 
+## Admin — `/admin` 🔒👮
+
+Two separate gates, and being past the first does not get you past the second.
+
+**👮 = a live admin session**, which is *not* the ordinary login cookie. It is a
+distinct `retailstore_2n_admin` cookie, signed with a secret derived from
+`JWT_SECRET`, lasting **30 minutes**. Obtaining one needs the password **again**
+plus a TOTP code. See
+[ADR 0006](adr/0006-kyc-store-reference-not-document.md) for the identity side;
+the reasoning here is the same — a stolen shopping cookie must not carry the
+power to suspend accounts.
+
+`role: ADMIN` is granted **only by CLI** (`npm run admin:grant`). There is no
+promotion endpoint, and adding one would defeat the arrangement: the whole
+point is that granting admin needs shell access to the server, not a session in
+a browser.
+
+Failures return **401 `ADMIN_SESSION_REQUIRED`**, or **403 `ADMIN_REVOKED`** if
+the role was withdrawn while a session was still live — the role is re-read
+from the database on every request, so revocation takes effect immediately
+rather than when the token expires.
+
+### Step-up
+
+| Route | Needs | Notes |
+| --- | --- | --- |
+| `GET /admin/session` | 🔒 | `{ isAdmin, needsTotpSetup }`. Plain `false` for non-admins, not a 403 — this decides whether to render a link. |
+| `POST /admin/totp/setup` | 🔒 + password | Returns `{ qrDataUrl, secret }`. Stored unconfirmed. |
+| `POST /admin/totp/confirm` | 🔒 + code | Sets `totpConfirmedAt`. Until then the enrolment does not count. |
+| `POST /admin/session` | 🔒 + password + code | Mints the admin cookie. Rate limited to **8 per 15 min**. |
+| `GET /admin/session/active` | 👮 | `{ active, secondsLeft }`, read from the token's own `exp`. |
+| `POST /admin/session/end` | 🔒 | Clears the cookie. |
+
+A wrong password and a wrong code return the **same** message. Distinguishing
+them would tell an attacker which half they had already solved.
+
+**Codes are single-use.** A valid code spans about 90 seconds here, because one
+30-second step either side is accepted for clock drift — so without this the
+same six digits keep working for that whole window, and a code seen over a
+shoulder or relayed by a phishing proxy can be spent again by someone else.
+`User.totpLastUsedAt` records the period last accepted, and anything from that
+period or earlier is refused with the same generic message. The claim is an
+atomic conditional UPDATE, so two requests carrying the same code cannot both
+win a read-then-write race.
+
+One consequence worth knowing: finishing enrolment spends a code, so the very
+next step-up needs the *next* one. The panel says so rather than letting someone
+retype the digits their app is still displaying.
+
+### Dashboard — all read-only
+
+| Route | Returns |
+| --- | --- |
+| `GET /admin/metrics?days=7\|30\|90` | Headline figures, a daily series, `attention`, `topSellers`, `recentOrders` |
+| `GET /admin/orders?q=&status=&page=` | Paged orders; searches reference, buyer name, buyer email |
+| `GET /admin/orders/:id` | One order: lines, ship-to snapshot, payment reference |
+| `GET /admin/customers?q=&filter=&page=` | Paged accounts; `filter=ALL\|SELLERS\|SUSPENDED\|ADMINS` |
+| `GET /admin/customers/:id` | One account: lifetime spend, recent orders, shop, reports against |
+| `GET /admin/catalogue?q=&status=&page=` | Paged listings; `status` adds `REMOVED` for soft-deleted |
+| `GET /admin/overview` | Bare counts, used for the sidebar badge |
+| `GET /admin/reports?status=` | The moderation queue, **oldest first** |
+| `GET /admin/audit` | Every moderation action, newest first |
+| `GET /admin/deliveries?q=&channel=&status=&page=` | The delivery ledger. `q` takes an email address, a name, or an `eventId`; `channel=EMAIL\|PUSH\|SMS`; `status` adds `DEFERRED` and `PENDING`. Also returns `byStatus` for the whole filtered set |
+| `GET /admin/payouts?q=&status=&page=` | Money sent to sellers. `q` takes a seller email or name, a payout id, or the provider's transfer id; `status=PENDING\|PAID\|FAILED`. Returns `byStatus` and `totals` (sent, netted off, outstanding seller debt) for the whole filtered set. **Read only — there is no retry here**, because a retry moves money and only the seller's claim-then-transfer path cannot double-pay |
+| `GET /admin/returns?q=&status=&page=` | Return requests. `q` takes a buyer email or name, a request id, or an order reference; `status` covers all six states. **`ESCALATED` is why this exists** — a buyer asked, the seller refused, and only a moderator can see it, because a seller sees only their own and a buyer only theirs. Ordered so escalations come first |
+| `POST /admin/returns/:id/decide` | Settles one. `{approve, note}`. A rejection here is **terminal** (`REJECTED`, not `REFUSED`) so the same request cannot be escalated to a second moderator. Approving issues the refund; a provider failure puts the request back and answers `502`. The audit trail is `decidedById` on the request plus `initiatedById` on the refund — the same arrangement as the admin refund route, rather than a duplicate moderation-log entry that could disagree with it |
+
+Lists page at **25**, returning `{ rows, total, page, pages, pageSize }`.
+
+`metrics` counts **only `PAID` orders**, and the figure is labelled *gross
+sales*, never revenue: RetailStore_2n takes no cut, so none of it is the platform's.
+Period-on-period deltas come back **`null`**, not `0` or `100`, when the prior
+period had nothing to compare against.
+
+The report queue returns `reporterName` and **never the reporter's email**.
+
+`deliveries` answers "did the buyer get the refund email?" — a real support
+question that previously needed a database console. Each row carries *why*, not
+just what: `suppressReason` for a channel the recipient turned off,
+`lastError` for a provider that refused, `notBefore` for something quiet hours
+parked. `recipient` is **null** when the account has since been deleted, because
+the ledger has no foreign key to `users` and a delivery record has to outlive
+the account it was for.
+
+**There is no message body in the response, and there is not meant to be.** The
+ledger records that something was sent, not what it said
+([ADR 0026](adr/0026-delivery-idempotency.md)), and this endpoint must not
+become the place that leaks it.
+
+### Actions — every one writes an audit row
+
+| Route | Effect |
+| --- | --- |
+| `POST /admin/listings/:id/remove` | Soft delete. Orders containing it keep working. |
+| `POST /admin/listings/:id/restore` | Returns it as **`DRAFT`**, never straight to live — republishing is the seller's call. |
+| `POST /admin/reviews/:id/remove` | Soft delete. |
+| `POST /admin/users/:id/suspend` | Blocks sign-in. Deletes nothing. |
+| `POST /admin/users/:id/reinstate` | Lifts it. |
+| `POST /admin/reports/:id/resolve` | Closes a report; `dismissed: true` records "looked, found nothing". |
+
+All take `{ reason, reportId? }`. **`reason` is required** (3–1000 chars) and is
+shown verbatim to the person affected — **400 `REASON_REQUIRED`** without one.
+An audit row that reads only "suspended by X" is useless six months later, and
+someone whose listing vanished is owed the reason.
+
+**400** for suspending yourself, **403 `CANNOT_SUSPEND_ADMIN`** for suspending
+another admin — revoke the role from the CLI first. Both are checked *before*
+"already suspended", so the answer does not depend on the target's current
+state.
+
+---
+
 ## Webhooks — `/webhooks/stripe`
 
 Signature-verified, raw body, mounted **before** `express.json()` — Stripe signs

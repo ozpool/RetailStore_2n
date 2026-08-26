@@ -33,6 +33,7 @@ the old one, rather than an edit.
 | [0014](0014-one-order-fulfilment-per-line.md) | One order per basket, fulfilment per line; addresses snapshotted | Accepted |
 | [0015](0015-admin-by-cli-grant-and-step-up.md) | Admin granted only by CLI; step-up with TOTP to open the panel | Accepted |
 | [0016](0016-refunds-claim-then-refund.md) | Refunds: claim headroom atomically, then refund; per line, append-only | Accepted |
+| [0017](0017-password-change-and-reset.md) | Password change and reset; no enumeration, sessions revoked, TOTP survives | Accepted |
 
 
 ## Adding one

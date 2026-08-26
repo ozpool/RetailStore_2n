@@ -80,6 +80,8 @@ enum NotificationType {
   REVIEW_RECEIVED
   IDENTITY_VERIFIED
   IDENTITY_REJECTED
+  /// Buyer: money has been sent back.
+  REFUND_ISSUED
   /// Moderation outcomes, addressed to whoever they affect.
   LISTING_REMOVED
   ACCOUNT_SUSPENDED
@@ -130,6 +132,29 @@ enum ModerationActionType {
   USER_REINSTATED
   REVIEW_REMOVED
   REPORT_DISMISSED
+}
+
+/// How a refund is going, at the provider.
+///
+/// PENDING exists for the same reason OrderStatus.PROCESSING does: the request
+/// has been sent and we do not yet know the answer. A refund that is assumed to
+/// have worked is how a buyer ends up told their money is back when it is not.
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+/// Who decided to give the money back.
+///
+/// Recorded because "the seller could not send it" and "a moderator overruled a
+/// dispute" are different events with different follow-ups, and six months later
+/// the refund row is the only place that distinction still exists.
+enum RefundTrigger {
+  /// A seller marked their line unfulfillable. Issued automatically.
+  SELLER_UNFULFILLABLE
+  /// A moderator issued it from the admin panel.
+  ADMIN
 }
 
 /// Whether an item has actually been sent.
@@ -623,6 +648,21 @@ model Order {
   paidAt          DateTime?
   failureReason   String?
 
+  /// HOW MUCH HAS GONE BACK, in the same minor units as subtotalCents.
+  ///
+  /// Denormalised on purpose. It is not a display convenience — it is the
+  /// column the over-refund guard reads. Issuing a refund is a conditional
+  /// UPDATE of the form "add X only if refundedCents + X <= subtotalCents",
+  /// which is the same claim-then-charge discipline payment uses, for the same
+  /// reason: two concurrent refund requests must not both reach the provider.
+  /// Summing the refund rows per request could not be made atomic that way.
+  ///
+  /// A PAID order with refundedCents > 0 is a partial refund, and is a normal
+  /// expected state — a basket can span sellers, and one seller failing to send
+  /// does not undo the others. status only becomes REFUNDED once the whole
+  /// subtotal has gone back.
+  refundedCents Int @default(0)
+
   /// WHERE THIS WAS SENT — a snapshot, not a relation.
   ///
   /// Copied from the buyer's Address at checkout for the same reason
@@ -643,10 +683,67 @@ model Order {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
+  refunds   Refund[]
 
   @@index([buyerId])
   @@index([status])
   @@map("orders")
+}
+
+/// Money sent back, and why.
+///
+/// APPEND-ONLY, like ModerationAction and KycAttempt
+/// A refund is a financial event. Rows are never edited except to move status
+/// off PENDING, because "we returned $32 on the 4th because the seller could
+/// not post it" has to still be answerable a year later — including, and
+/// especially, when somebody disputes it.
+///
+/// PER LINE, NOT PER ORDER
+/// orderItemId is nullable so a moderator can refund an order as a whole, but
+/// the ordinary case names the line: a basket can span several sellers, and one
+/// seller failing to send says nothing about the others. Refunding the whole
+/// order there would take money from sellers who did their part.
+///
+/// THE AMOUNT IS SNAPSHOTTED
+/// Not derived from the line at read time, for the same reason OrderItem copies
+/// title and price. What was actually returned is a fact about the past, and it
+/// must not move when anything else does.
+model Refund {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Which line this was for. Null means the order as a whole.
+  orderItemId String?
+
+  amountCents Int
+  currency    String @default("USD")
+
+  status  RefundStatus  @default(PENDING)
+  trigger RefundTrigger
+
+  /// Shown to the buyer verbatim. Required, for the same reason a moderation
+  /// action's reason is: money moving with no stated cause is unanswerable.
+  reason String
+
+  /// Who pressed the button. Null for automatic refunds, which are attributable
+  /// to the seller action recorded on the order line instead.
+  initiatedById String?
+
+  /// A REFERENCE to the provider's refund, never card data.
+  /// See docs/adr/0013-payment-provider-seam.md
+  provider         String?
+  providerRefundId String? @unique
+  /// Why the provider refused. Null unless status is FAILED.
+  failureReason    String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([status])
+  @@map("refunds")
 }
 
 /// One line of an order.

@@ -191,6 +191,7 @@ model User {
   updatedAt          DateTime                 @updatedAt
   refreshTokens      RefreshToken[]
   verificationTokens EmailVerificationToken[]
+  passwordResets     PasswordResetToken[]
   sellerProfile      SellerProfile?
   reviews            Review[]
   reservations       Reservation[]
@@ -609,6 +610,30 @@ model EmailVerificationToken {
 
   @@index([userId])
   @@map("email_verification_tokens")
+}
+
+/// A live credential emailed to somebody who cannot sign in.
+///
+/// Mirrors EmailVerificationToken deliberately — same hashing, same single-use
+/// rule — with one difference that matters: a MUCH shorter life. A verification
+/// link only proves an inbox exists; a reset link *is* the account until it is
+/// used, so it gets one hour rather than twenty-four.
+///
+/// Only the hash is stored. A database leak must not hand over working reset
+/// links for every account that happens to have one outstanding.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  /// Set the moment it is redeemed. Single-use, so a link forwarded, logged by
+  /// a mail scanner, or sitting in a browser history cannot be replayed.
+  usedAt    DateTime?
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model RefreshToken {

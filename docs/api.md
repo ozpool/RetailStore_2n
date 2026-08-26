@@ -191,6 +191,82 @@ Tokens revoked by logout or a password change are never graced, and outside the
 window a replay still revokes everything.
 → [ADR 0021](adr/0021-refresh-race-grace-window.md)
 
+### `POST /auth/password/change` 🔒
+
+```json
+{ "currentPassword": "...", "newPassword": "at least 12 chars" }
+```
+
+The current password is required **even though the caller is authenticated**.
+A stolen session must not be enough to take the account permanently.
+
+Revokes every **other** refresh token — the calling tab stays signed in, because
+signing you out for good security hygiene is hostile. Outstanding reset links
+are burned too, so a compromise-driven change does not leave a working link in
+an inbox somebody else may be reading.
+
+`200` → `{ "ok": true, "otherSessionsEnded": 2, "message": "..." }`
+
+| Failure | Code | `field` |
+| --- | --- | --- |
+| Current password wrong | `WRONG_PASSWORD` (401) | `currentPassword` |
+| Under 12 characters | `INVALID_INPUT` | `newPassword` |
+| Same as the current one | `SAME_PASSWORD` | `newPassword` |
+| Found in breach corpora | `PASSWORD_BREACHED` | `newPassword` |
+
+Rate limited to 10 per 15 minutes — the current-password check is a password
+oracle for anyone holding a stolen session and guessing.
+
+### `POST /auth/password/forgot`
+
+```json
+{ "email": "ada@example.com" }
+```
+
+**Always `200`, with an identical body**, whether the address is registered,
+unregistered, or malformed — and identical again when rate limited. Anything
+else makes this an account-enumeration oracle, and the list it produces is
+exactly what a credential-stuffing run wants.
+
+Rate limited **per address** (3/hour, so the endpoint cannot be used to flood
+somebody's inbox) **and per caller** (20/hour, so one caller cannot do that to a
+long list of addresses). Neither limit changes the response.
+
+Asking again invalidates any previous unused link: two live links means the
+older one — the more likely to have leaked — still works.
+
+### `POST /auth/password/reset`
+
+```json
+{ "token": "<from the emailed link>", "newPassword": "at least 12 chars" }
+```
+
+Single-use, **one hour**. A verification link only proves an inbox exists; a
+reset link *is* the account until it is used, which is why it does not get the
+24 hours verification does. Only the hash is stored.
+
+Unknown, expired and already-used tokens all return the **same**
+`INVALID_TOKEN` message. Saying "expired" would confirm the token was real.
+
+Rate limited to 100/hour per caller — a courtesy cap rather than a guessing
+control. The token is 256 bits, so the endpoint cannot be brute forced at any
+limit, and an invalid one costs a hash plus an indexed lookup and returns before
+any bcrypt or breach-list call. A tighter cap would mostly punish shared egress
+addresses.
+
+Revokes **every** session — there is none to preserve, and if the account was
+taken over then the intruder's is among them. Also sets `emailVerified`:
+redeeming the link proves inbox control, which is what verification asks, so an
+unverified account is not left locked out for a reason it has already satisfied.
+
+**No session is issued.** The response sends you to sign in with the password
+you just chose. Doing otherwise would make a reset link a one-click login, and
+links leak — forwarded mail, shared screens, scanners that follow URLs.
+
+> A reset deliberately does **not** clear an admin's TOTP enrolment. Mail access
+> must not strip a second factor, since the inbox is precisely where the reset
+> link lands.
+
 ### `POST /auth/logout`
 
 Revokes the refresh token and clears cookies. `204`.

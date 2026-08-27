@@ -34,6 +34,7 @@ the old one, rather than an edit.
 | [0015](0015-admin-by-cli-grant-and-step-up.md) | Admin granted only by CLI; step-up with TOTP to open the panel | Accepted |
 | [0016](0016-refunds-claim-then-refund.md) | Refunds: claim headroom atomically, then refund; per line, append-only | Accepted |
 | [0017](0017-password-change-and-reset.md) | Password change and reset; no enumeration, sessions revoked, TOTP survives | Accepted |
+| [0018](0018-redis-for-shared-ephemeral-state.md) | Redis for rate-limit counters; shared ephemeral state only, never a source of truth | Accepted |
 
 
 ## Adding one

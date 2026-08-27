@@ -11,6 +11,7 @@ import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertProviderConfigured } from "./lib/paymentProvider";
 import { assertMailConfigured } from "./lib/mailer";
+import { assertRateLimitStore } from "./lib/rateLimit";
 import { startReservationSweeper } from "./lib/reservations";
 import { ordersRouter } from "./routes/orders";
 import { addressesRouter } from "./routes/addresses";
@@ -110,6 +111,21 @@ app.listen(PORT, () => {
   console.log(`Payments: ${paymentSummary}`);
   console.log(`Identity: ${kycSummary}`);
   console.log(`Email:    ${mailSummary}`);
+
+  /**
+   * Reported after binding, not before.
+   *
+   * Unlike the payment and mail checks this one is not fatal: an unreachable
+   * Redis is a degraded limiter, not a broken server, and refusing to start
+   * would turn a cache outage into an outage. It is printed loudly so nobody
+   * has to guess whether their limits are actually shared between instances.
+   */
+  assertRateLimitStore()
+    .then((summary) => console.log(`Limits:   ${summary}`))
+    .catch((err) => {
+      console.error(`Limits:   REDIS UNREACHABLE — ${(err as Error).message}`);
+      console.error("          Limits fall back to per-process counters.");
+    });
 
   /**
    * Also not fatal, and also printed loudly.

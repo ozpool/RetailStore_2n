@@ -902,6 +902,28 @@ Two people can save the same one-of-a-kind chair and neither has claimed it.
 
 ---
 
+## Reviews — `/reviews` 🔒
+
+A review requires a **PAID order for that listing**. An open review box on a
+marketplace is a reputation weapon — competitors bury each other, sellers
+inflate themselves, and the stars that gate every buying decision stop meaning
+anything.
+
+- `GET /reviews/for/:listingId` — `{ canReview, code, reason, mine }`.
+  `code` is `OK`, `NOT_PURCHASED`, `OWN_LISTING`, or `GONE`. Ownership is
+  checked **before** purchase, so a seller is told they own it rather than being
+  sent off to buy their own item.
+- `POST /reviews` — `{ listingId, rating, body }`. An upsert: writing again
+  edits the existing review. One per person per listing, by unique index.
+- `PATCH /reviews/:id` · `DELETE /reviews/:id` — author only; 404 otherwise.
+
+`GET /catalog/listings/:slug` returns `ratingBreakdown` and a per-review
+`verified` flag. That flag is **computed against real paid orders**, not
+assumed — seeded reviews have no order behind them, and a badge that isn't
+earned devalues every badge on the site.
+
+---
+
 ## Reports — `/reports` 🔒
 
 Anyone signed in can report a listing, a review, or an account.

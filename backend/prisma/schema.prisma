@@ -1,0 +1,822 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Lifecycle of a listing. Most goods here are one-of-a-kind, so the
+/// important guarantee is "nobody else can buy this one", not a stock count.
+/// RESERVED exists so checkout can hold a unique item without selling it twice.
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  RESERVED
+  SOLD
+  REMOVED
+}
+
+/// Constrained so buyers can actually filter on it. The seller's own wording
+/// lives in Listing.conditionNote, which is what the UI shows.
+enum Condition {
+  LIKE_NEW
+  GOOD
+  WELL_LOVED
+  NEEDS_REPAIR
+}
+
+enum VerificationStatus {
+  UNSTARTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+/// A hold placed on stock while a buyer completes checkout.
+/// HELD is the only state that consumes availability.
+enum ReservationStatus {
+  HELD
+  RELEASED
+  CONVERTED
+  EXPIRED
+}
+
+/// PENDING_PAYMENT and PROCESSING keep stock committed. Anything else has
+/// either taken the money or given the stock back.
+///
+/// PROCESSING is the mutual-exclusion mechanism for payment. A request claims
+/// the order by moving it PENDING_PAYMENT -> PROCESSING in one conditional
+/// UPDATE; only the request whose UPDATE matched a row may call the provider.
+/// Without it, two concurrent clicks both read PENDING_PAYMENT, both pass the
+/// status check, and both charge the card.
+/// See docs/adr/0013-payment-provider-seam.md
+enum OrderStatus {
+  PENDING_PAYMENT
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+/// What a notification is about.
+///
+/// Every value corresponds to something that ACTUALLY HAPPENED to this user —
+/// their item sold, their parcel moved, a decision landed on their account.
+/// Nothing here is marketing. A notification list that mixes "your order
+/// shipped" with "check out our new arrivals" trains people to ignore both.
+enum NotificationType {
+  /// Seller: someone bought your item.
+  SALE_MADE
+  /// Buyer: the seller has sent it.
+  ORDER_SHIPPED
+  /// Seller: the buyer confirmed it arrived.
+  ORDER_DELIVERED
+  /// Buyer: the seller cannot send it after all.
+  ORDER_UNFULFILLABLE
+  /// Seller: someone reviewed something you sold.
+  REVIEW_RECEIVED
+  IDENTITY_VERIFIED
+  IDENTITY_REJECTED
+  /// Buyer: money has been sent back.
+  REFUND_ISSUED
+  /// Moderation outcomes, addressed to whoever they affect.
+  LISTING_REMOVED
+  ACCOUNT_SUSPENDED
+  REPORT_RESOLVED
+}
+
+/// Who someone is on the platform.
+///
+/// A flag rather than a permissions table: there are two kinds of person here,
+/// and inventing a role system for two roles is how you end up maintaining one.
+enum UserRole {
+  USER
+  ADMIN
+}
+
+/// What a report is about. The target id is not a foreign key — a report must
+/// survive the thing it reported being deleted, which is often the outcome.
+enum ReportTargetType {
+  LISTING
+  USER
+  REVIEW
+}
+
+/// Constrained so reports can be triaged and counted. The reporter's own words
+/// go in Report.detail, which is what a moderator actually reads.
+enum ReportReason {
+  PROHIBITED_ITEM
+  COUNTERFEIT
+  MISLEADING_DESCRIPTION
+  SPAM
+  HARASSMENT
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  /// Looked at, nothing wrong. Distinct from RESOLVED so "we did nothing" is
+  /// recorded as a decision rather than looking like an unfinished queue item.
+  DISMISSED
+}
+
+/// What a moderator did, and why.
+enum ModerationActionType {
+  LISTING_REMOVED
+  LISTING_RESTORED
+  USER_SUSPENDED
+  USER_REINSTATED
+  REVIEW_REMOVED
+  REPORT_DISMISSED
+}
+
+/// How a refund is going, at the provider.
+///
+/// PENDING exists for the same reason OrderStatus.PROCESSING does: the request
+/// has been sent and we do not yet know the answer. A refund that is assumed to
+/// have worked is how a buyer ends up told their money is back when it is not.
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+/// Who decided to give the money back.
+///
+/// Recorded because "the seller could not send it" and "a moderator overruled a
+/// dispute" are different events with different follow-ups, and six months later
+/// the refund row is the only place that distinction still exists.
+enum RefundTrigger {
+  /// A seller marked their line unfulfillable. Issued automatically.
+  SELLER_UNFULFILLABLE
+  /// A moderator issued it from the admin panel.
+  ADMIN
+}
+
+/// Whether an item has actually been sent.
+///
+/// DELIBERATELY SEPARATE FROM OrderStatus
+/// Payment and delivery are independent facts: an order is PAID *and*
+/// UNFULFILLED for as long as it takes the seller to reach a post office, and
+/// one enum cannot hold both. Folding them together is how systems end up with
+/// states like "PAID_BUT_ALSO_SHIPPED".
+///
+/// It lives on OrderItem rather than Order because a basket can span several
+/// sellers, and two sellers cannot share one parcel. Each line is fulfilled by
+/// whoever sold it.
+enum FulfilmentStatus {
+  UNFULFILLED
+  SHIPPED
+  DELIVERED
+  /// The seller could not send it. Distinct from a payment failure.
+  UNFULFILLABLE
+}
+
+model User {
+  id                 String                   @id @default(uuid())
+  email              String                   @unique
+  passwordHash       String
+  name               String
+  isSeller           Boolean                  @default(false)
+  emailVerified      Boolean                  @default(false)
+  /// Public URL of the processed avatar, or null to fall back to initials.
+  /// The image itself lives in object storage, never in this database —
+  /// see docs/adr/0011-avatars-in-object-storage.md
+  avatarUrl          String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  refreshTokens      RefreshToken[]
+  verificationTokens EmailVerificationToken[]
+  passwordResets     PasswordResetToken[]
+  sellerProfile      SellerProfile?
+  reviews            Review[]
+  reservations       Reservation[]
+  /// Two kinds of person, so a flag rather than a permissions table.
+  role               UserRole                 @default(USER)
+
+  /// SUSPENSION, NOT DELETION
+  /// A suspended account cannot log in, but its listings, orders, and reviews
+  /// stay exactly where they are. Deleting a bad actor would also delete the
+  /// evidence, and would orphan the orders of people who bought from them in
+  /// good faith.
+  suspendedAt     DateTime?
+  /// Shown to them at the login screen. Vague suspensions are indistinguishable
+  /// from bugs, and generate support instead of preventing it.
+  suspendedReason String?
+
+  /// TOTP, for admins only.
+  ///
+  /// WHY TOTP AND NOT SMS OR EMAIL
+  /// SMS is vulnerable to SIM-swap, which is a real attack against exactly the
+  /// kind of account that has admin rights. Emailed codes are only as strong as
+  /// the inbox — and the inbox is also where a password reset lands, so one
+  /// compromise would hand over both factors at once. TOTP depends on neither:
+  /// an authenticator app and a shared secret, stronger than both.
+  ///
+  /// The secret is stored raw because it has to be: verifying a code requires
+  /// recomputing it, so there is no hashed form that would still work. That is
+  /// a real limitation of TOTP, and the mitigation is that it is only ever set
+  /// for admin accounts, of which there should be very few.
+  totpSecret      String?
+  /// Null until a code has been entered correctly. An enrolment that was
+  /// started but never confirmed must not be treated as a second factor.
+  totpConfirmedAt DateTime?
+  /// REPLAY PROTECTION: the start of the 30-second period whose code was last
+  /// accepted.
+  ///
+  /// A TOTP code stays valid for about 90 seconds here, because one step either
+  /// side is allowed for clock drift. Without this column the same six digits
+  /// work repeatedly inside that window — so a code read over someone's
+  /// shoulder, or captured by a proxy that relays it, can be used a second time
+  /// by someone else.
+  ///
+  /// Any code from this period or earlier is refused, which makes each code
+  /// single-use. Stored as the period start rather than the moment of use so
+  /// the comparison is exact: two codes from the same period are the same code.
+  totpLastUsedAt  DateTime?
+
+  orders            Order[]
+  wishlist          WishlistItem[]
+  addresses         Address[]
+  notifications     Notification[]
+  reportsMade       Report[]                 @relation("ReportsMade")
+  moderationActions ModerationAction[]       @relation("ModeratorActions")
+
+  @@index([role])
+  @@map("users")
+}
+
+/// Something that happened to this user, worth telling them about.
+///
+/// IN-APP ONLY, BY CHOICE
+/// Email delivery exists (see lib/mailer.ts) but nothing here uses it. Sending
+/// mail for every sale, shipment, and moderation decision needs per-type
+/// preferences and an unsubscribe path first, or it becomes the reason people
+/// filter this domain to spam. This table stays the source of truth; when mail
+/// does go out, it reads from here rather than replacing it.
+///
+/// TITLE AND BODY ARE WRITTEN AT CREATION, NOT RENDERED LATER
+/// Same reasoning as OrderItem's snapshots: "Cast iron skillet sold" has to
+/// keep saying that after the listing is renamed, repriced, or deleted. A
+/// notification that re-derives its own text can quietly rewrite history, and
+/// a notification about a deleted thing would break entirely.
+model Notification {
+  id     String           @id @default(uuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+
+  title String
+  body  String?
+  /// Where to go when it's clicked. A plain path, so a moved route is a
+  /// dead link rather than a crash.
+  link  String?
+
+  /// Null means unread. A nullable timestamp rather than a boolean, because
+  /// "when did they see it" is worth having and costs nothing.
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  /// The unread badge, and the list. Both read by user.
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+/// Someone flagging something.
+///
+/// The target is a type plus a bare id, NOT a foreign key. A report has to
+/// survive the thing it reported being removed — which is frequently the whole
+/// point of the report — and three nullable FKs would be worse than one id.
+model Report {
+  id         String @id @default(uuid())
+  reporterId String
+  reporter   User   @relation("ReportsMade", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  targetType ReportTargetType
+  targetId   String
+  reason     ReportReason
+  /// The reporter's own words. This is what a moderator actually reads.
+  detail     String?
+
+  status     ReportStatus @default(OPEN)
+  resolution String?
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// One open report per person per thing, so a single upset user cannot
+  /// inflate a queue by reporting the same listing eleven times. Enforced in
+  /// the app: Prisma cannot express `WHERE status = 'OPEN'`.
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reporterId])
+  @@map("reports")
+}
+
+/// What a moderator did.
+///
+/// Retained rather than overwritten, for the same reason KycAttempt is: a
+/// decision to remove someone's listing or suspend their account has to be
+/// explainable afterwards, including when it was wrong.
+model ModerationAction {
+  id          String @id @default(uuid())
+  moderatorId String
+  moderator   User   @relation("ModeratorActions", fields: [moderatorId], references: [id], onDelete: Cascade)
+
+  action     ModerationActionType
+  targetType ReportTargetType
+  targetId   String
+  /// Free text. Shown to the affected user, so it has to be readable.
+  reason     String
+  /// The report this came from, if any. Direct actions have none.
+  reportId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("moderation_actions")
+}
+
+/// Where someone's orders get delivered.
+///
+/// SOFT DELETE, AND SNAPSHOTS ON ORDERS
+/// This row is the buyer's *current* address book entry. It is never referenced
+/// by a past order — orders copy the fields onto themselves at checkout, the
+/// same way OrderItem copies title and price. Editing your address next year
+/// must not rewrite where a parcel was sent last year, and deleting it must not
+/// leave an order pointing at nothing.
+///
+/// Deleted entries are kept because the buyer may be mid-checkout when they
+/// press delete, and because a removed address is not something anyone needs to
+/// destroy.
+model Address {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Free-form on purpose. Address formats differ enough by country that
+  /// structured fields beyond this cause more bad data than they prevent.
+  fullName String
+  line1    String
+  line2    String?
+  city     String
+  /// State, province, or county. Optional — plenty of countries have no such thing.
+  region   String?
+  postcode String
+  /// ISO 3166-1 alpha-2.
+  country  String
+  phone    String?
+
+  /// At most one per user, enforced in the app inside a transaction — Prisma
+  /// cannot express a partial unique index on `isDefault = true`.
+  isDefault Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+/// A saved listing.
+///
+/// Deliberately the opposite of a Reservation: no quantity, no expiry, and no
+/// effect whatsoever on availability. Saving something must never take it out
+/// of the shop, or two people saving the same chair would each think they had
+/// claimed it.
+///
+/// The compound unique is what makes saving idempotent — a double-tapped heart,
+/// or the same listing opened in two tabs, cannot produce two rows. The app
+/// relies on that rather than checking first and inserting after, which is the
+/// same read-then-write race as ADR 0012.
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, listingId])
+  /// Ordered newest-first per user, which is the only way this is ever read.
+  @@index([userId, createdAt])
+  @@map("wishlist_items")
+}
+
+/// A time-limited hold on a listing's stock, taken before checkout.
+///
+/// This exists because almost everything here is quantity 1, so the hard
+/// problem is not counting stock — it is making sure two buyers can never both
+/// claim the same object. Availability is decided under a row lock on the
+/// listing; see docs/adr/0012-row-locking-for-reservations.md
+model Reservation {
+  id         String            @id @default(uuid())
+  listingId  String
+  listing    Listing           @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quantity   Int
+  status     ReservationStatus @default(HELD)
+  /// Holds are deliberately short-lived so abandoned checkouts return stock.
+  expiresAt  DateTime
+  createdAt  DateTime          @default(now())
+  releasedAt DateTime?
+
+  /// A partial unique index enforces one HELD hold per buyer per listing.
+  /// Prisma can't express `WHERE status = 'HELD'`, so it's added by hand in the
+  /// migration — a plain @@unique would also constrain RELEASED rows and stop a
+  /// buyer ever re-reserving the same item.
+  @@index([listingId, status])
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("reservations")
+}
+
+/// One-to-one with User, created when someone starts selling. Kept separate
+/// from User so identity-verification and payout state don't bloat the row
+/// every auth request reads.
+model SellerProfile {
+  id       String  @id @default(uuid())
+  userId   String  @unique
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopName String
+  bio      String?
+
+  /// Identity verification is a REFERENCE to a provider's result — never the
+  /// document itself. Storing raw government ID images or numbers would make
+  /// this table a breach target and pull it under special-category data rules
+  /// (GDPR, India's DPDP Act). We keep only what we need to prove state.
+  kycStatus          VerificationStatus @default(UNSTARTED)
+  kycProvider        String?
+  kycSessionId       String?
+  kycDocType         String?
+  kycCountry         String?
+  kycVerifiedAt      DateTime?
+  kycRejectionReason String?
+
+  /// Gated by kycStatus. Following the Stripe Connect model: you may list
+  /// items unverified, but money cannot move to you until identity clears.
+  /// OUR gate: set only from a recorded identity decision. See ADR 0007 and
+  /// lib/verification.ts, which is the single place allowed to write it.
+  payoutsEnabled Boolean @default(false)
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  listings    Listing[]
+  kycAttempts KycAttempt[]
+  sales       OrderItem[]
+
+  @@map("seller_profiles")
+}
+
+/// Audit trail of identity-verification attempts. Identity checks are exactly
+/// the kind of decision that has to be explainable after the fact, so each
+/// attempt is retained rather than overwritten — SellerProfile keeps only the
+/// current state for fast reads.
+///
+/// Like SellerProfile, this stores a REFERENCE to the provider's decision and
+/// never any part of the document: no image, no document number, no date of
+/// birth. Those pass through memory and are discarded.
+model KycAttempt {
+  id                String             @id @default(uuid())
+  sellerProfileId   String
+  sellerProfile     SellerProfile      @relation(fields: [sellerProfileId], references: [id], onDelete: Cascade)
+  provider          String
+  providerSessionId String             @unique
+  status            VerificationStatus @default(PENDING)
+  documentType      String?
+  country           String?
+  rejectionReason   String?
+  createdAt         DateTime           @default(now())
+  completedAt       DateTime?
+
+  @@index([sellerProfileId])
+  @@map("kyc_attempts")
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  slug        String    @unique
+  title       String
+  description String
+  coverImage  String
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  listings    Listing[]
+
+  @@map("categories")
+}
+
+model Listing {
+  id          String @id @default(uuid())
+  slug        String @unique
+  title       String
+  description String
+
+  sellerId   String
+  seller     SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category      @relation(fields: [categoryId], references: [id])
+
+  condition     Condition
+  /// The seller's own phrasing ("Needs a tune-up", "Varies by piece"). This is
+  /// what renders on the card; `condition` is what powers filtering.
+  conditionNote String?
+
+  /// Money is stored as integer minor units. Never floats — 0.1 + 0.2 problems
+  /// have no place in a price column.
+  priceCents         Int
+  originalPriceCents Int?
+  currency           String @default("USD")
+
+  /// Defaults to 1: most secondhand goods are unique. Present because a seller
+  /// may genuinely have several identical pieces.
+  quantity Int           @default(1)
+  status   ListingStatus @default(DRAFT)
+
+  /// Merchandising flag for the "Picked for you" shelf. This is hand-curation,
+  /// not personalisation — there is no recommendation engine behind it, and
+  /// naming it `featured` keeps that honest at the data layer.
+  featured Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /// Soft delete — a listing referenced by a past order must never vanish.
+  deletedAt DateTime?
+
+  images       ListingImage[]
+  reviews      Review[]
+  reservations Reservation[]
+  orderItems   OrderItem[]
+  wishlistedBy WishlistItem[]
+
+  @@index([categoryId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([featured])
+  @@map("listings")
+}
+
+model ListingImage {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  /// 0 is the cover image.
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([listingId])
+  @@map("listing_images")
+}
+
+/// Ratings shown in the UI are computed from these rows, not stored as a
+/// number on the listing. A listing with no reviews honestly shows none.
+model Review {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// Whole stars, 1-5. Enforced in the app layer.
+  rating    Int
+  body      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listingId, authorId])
+  @@index([listingId])
+  @@map("reviews")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+/// A live credential emailed to somebody who cannot sign in.
+///
+/// Mirrors EmailVerificationToken deliberately — same hashing, same single-use
+/// rule — with one difference that matters: a MUCH shorter life. A verification
+/// link only proves an inbox exists; a reset link *is* the account until it is
+/// used, so it gets one hour rather than twenty-four.
+///
+/// Only the hash is stored. A database leak must not hand over working reset
+/// links for every account that happens to have one outstanding.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  /// Set the moment it is redeemed. Single-use, so a link forwarded, logged by
+  /// a mail scanner, or sitting in a browser history cannot be replayed.
+  usedAt    DateTime?
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model RefreshToken {
+  id                  String    @id @default(uuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash           String    @unique
+  createdAt           DateTime  @default(now())
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  replacedByTokenHash String?
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// A purchase. Created from the buyer's live holds, so the stock is already
+/// committed before payment is attempted — the alternative is telling someone
+/// their item is gone after they have paid.
+model Order {
+  id        String      @id @default(uuid())
+  /// Short human-facing reference for support conversations.
+  reference String      @unique
+  buyerId   String
+  buyer     User        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  status    OrderStatus @default(PENDING_PAYMENT)
+
+  /// Integer minor units, like every other money column here.
+  subtotalCents Int
+  currency      String @default("USD")
+
+  /// A REFERENCE to the payment, never card data. Same reasoning as the KYC
+  /// fields: the provider holds anything sensitive.
+  /// See docs/adr/0013-payment-provider-seam.md
+  paymentProvider String?
+  paymentIntentId String?   @unique
+  paidAt          DateTime?
+  failureReason   String?
+
+  /// HOW MUCH HAS GONE BACK, in the same minor units as subtotalCents.
+  ///
+  /// Denormalised on purpose. It is not a display convenience — it is the
+  /// column the over-refund guard reads. Issuing a refund is a conditional
+  /// UPDATE of the form "add X only if refundedCents + X <= subtotalCents",
+  /// which is the same claim-then-charge discipline payment uses, for the same
+  /// reason: two concurrent refund requests must not both reach the provider.
+  /// Summing the refund rows per request could not be made atomic that way.
+  ///
+  /// A PAID order with refundedCents > 0 is a partial refund, and is a normal
+  /// expected state — a basket can span sellers, and one seller failing to send
+  /// does not undo the others. status only becomes REFUNDED once the whole
+  /// subtotal has gone back.
+  refundedCents Int @default(0)
+
+  /// WHERE THIS WAS SENT — a snapshot, not a relation.
+  ///
+  /// Copied from the buyer's Address at checkout for the same reason
+  /// OrderItem copies title and price: they can edit or delete that address
+  /// afterwards, and an order has to keep saying where it actually went.
+  /// A foreign key would let last year's parcel silently move house.
+  ///
+  /// Nullable only because orders predating addresses exist.
+  shipToName     String?
+  shipToLine1    String?
+  shipToLine2    String?
+  shipToCity     String?
+  shipToRegion   String?
+  shipToPostcode String?
+  shipToCountry  String?
+  shipToPhone    String?
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  items     OrderItem[]
+  refunds   Refund[]
+
+  @@index([buyerId])
+  @@index([status])
+  @@map("orders")
+}
+
+/// Money sent back, and why.
+///
+/// APPEND-ONLY, like ModerationAction and KycAttempt
+/// A refund is a financial event. Rows are never edited except to move status
+/// off PENDING, because "we returned $32 on the 4th because the seller could
+/// not post it" has to still be answerable a year later — including, and
+/// especially, when somebody disputes it.
+///
+/// PER LINE, NOT PER ORDER
+/// orderItemId is nullable so a moderator can refund an order as a whole, but
+/// the ordinary case names the line: a basket can span several sellers, and one
+/// seller failing to send says nothing about the others. Refunding the whole
+/// order there would take money from sellers who did their part.
+///
+/// THE AMOUNT IS SNAPSHOTTED
+/// Not derived from the line at read time, for the same reason OrderItem copies
+/// title and price. What was actually returned is a fact about the past, and it
+/// must not move when anything else does.
+model Refund {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Which line this was for. Null means the order as a whole.
+  orderItemId String?
+
+  amountCents Int
+  currency    String @default("USD")
+
+  status  RefundStatus  @default(PENDING)
+  trigger RefundTrigger
+
+  /// Shown to the buyer verbatim. Required, for the same reason a moderation
+  /// action's reason is: money moving with no stated cause is unanswerable.
+  reason String
+
+  /// Who pressed the button. Null for automatic refunds, which are attributable
+  /// to the seller action recorded on the order line instead.
+  initiatedById String?
+
+  /// A REFERENCE to the provider's refund, never card data.
+  /// See docs/adr/0013-payment-provider-seam.md
+  provider         String?
+  providerRefundId String? @unique
+  /// Why the provider refused. Null unless status is FAILED.
+  failureReason    String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([status])
+  @@map("refunds")
+}
+
+/// One line of an order.
+///
+/// Title, price, and seller are SNAPSHOTS taken at purchase time, not lookups.
+/// A seller can rename or reprice a listing afterwards, and an order has to keep
+/// saying what was actually bought for what — otherwise order history silently
+/// rewrites itself.
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Kept so the buyer can still reach the product page. Nullable because a
+  /// listing may later be hard-deleted, and the order must survive that.
+  listingId String?
+  listing   Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  /// WHO SOLD IT.
+  ///
+  /// Without this a seller cannot answer "what did I sell?" — the line carried
+  /// only a `sellerName` string, which is a snapshot for display and not
+  /// something to query by. This was the single reason sellers were blind to
+  /// their own orders.
+  ///
+  /// Nullable and SetNull so closing a shop does not delete a buyer's receipt.
+  /// Going through the listing instead would not work: a listing can be
+  /// hard-deleted, and then the sale would lose its seller too.
+  sellerId String?
+  seller   SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+
+  title          String
+  unitPriceCents Int
+  quantity       Int
+  sellerName     String
+
+  /// Fulfilment is per line, because a basket can span several sellers and two
+  /// sellers cannot share one parcel.
+  fulfilment     FulfilmentStatus @default(UNFULFILLED)
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  carrier        String?
+  trackingNumber String?
+  /// Why the seller could not send it. Shown to the buyer verbatim.
+  fulfilmentNote String?
+
+  @@index([orderId])
+  /// The seller sales view: their lines, newest first.
+  @@index([sellerId, fulfilment])
+  @@map("order_items")
+}

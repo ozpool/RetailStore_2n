@@ -1,0 +1,35 @@
+{
+  // The suites, the demo scripts and the seeds — typechecked, never built.
+  //
+  // WHY A SECOND CONFIG RATHER THAN WIDENING THE FIRST.
+  // tsconfig.json exists to emit `dist`: `rootDir: "src"`, `module: commonjs`,
+  // `include: ["src"]`. A consequence nobody had noticed is that
+  // `tsc --noEmit` against it never looked at `tests/`, `scripts/` or
+  // `prisma/` — so all 33 suites and every demo script were unchecked, and a
+  // type error in one of them reached CI green and failed at runtime.
+  //
+  // These files cannot simply be added to that program. They are run by tsx
+  // and use `import.meta.dirname`, which `module: commonjs` rejects outright,
+  // and the browser suites pass callbacks to `page.evaluate` that execute in
+  // Chromium and therefore need the DOM lib. Both would have to be forced onto
+  // the API build to share one config. So: one config per job.
+  "compilerOptions": {
+    "target": "ES2022",
+    // ESM, because tsx runs these and they use import.meta.
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    // DOM, because page.evaluate callbacks run in a browser, not in Node.
+    // DOM.Iterable too: the image checks spread a NodeList, which is iterable
+    // at runtime in every browser but not typed as such without it.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["tests", "scripts", "prisma"],
+  "exclude": ["node_modules", "dist"]
+}

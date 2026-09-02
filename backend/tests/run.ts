@@ -35,6 +35,7 @@ const SUITES: Suite[] = [
   { name: "uploads", file: "api/uploads.ts", kind: "api" },
   { name: "admin", file: "api/admin.ts", kind: "api" },
   { name: "identity", file: "api/identity.ts", kind: "api" },
+  { name: "identity-stale", file: "api/identity-stale-session.ts", kind: "api" },
 ];
 
 function runOne(suite: Suite): Promise<{ code: number; passed: number; failed: number }> {

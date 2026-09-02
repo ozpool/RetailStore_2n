@@ -36,6 +36,7 @@ the old one, rather than an edit.
 | [0017](0017-password-change-and-reset.md) | Password change and reset; no enumeration, sessions revoked, TOTP survives | Accepted |
 | [0018](0018-redis-for-shared-ephemeral-state.md) | Redis for rate-limit counters; shared ephemeral state only, never a source of truth | Accepted |
 | [0019](0019-cache-tiering-rule.md) | A tiering rule for what may be cached; amends 0018, which rejected caching | Accepted |
+| [0021](0021-refresh-race-grace-window.md) | Concurrent refresh handled by a grace window in Postgres, not a Redis lock | Accepted |
 
 
 ## Adding one

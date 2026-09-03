@@ -94,6 +94,65 @@ services:
       timeout: 5s
       retries: 10
 
+  # ------------------------------------------------------------------
+  # A streaming standby. Behind a profile, so it is opt-in.
+  #
+  #   docker compose --profile ha up -d postgres-replica
+  #
+  # WHAT THIS IS FOR, AND WHAT IT IS NOT
+  # Availability: if the primary's machine dies, a byte-for-byte copy exists
+  # that is seconds behind rather than a nightly backup behind.
+  #
+  # It is NOT a backup. Replication copies everything faithfully and in
+  # milliseconds, `DROP TABLE orders` included — that is it working correctly.
+  # Surviving a mistake needs WAL archiving and point-in-time recovery, which
+  # is separate work.
+  #
+  # NOTHING READS FROM IT. The application still sends every query to the
+  # primary. Routing reads here would introduce read-your-writes bugs — a buyer
+  # completing checkout and being shown an order list that has not replayed
+  # their order yet — and the caching in ADR 0019 already absorbed the read
+  # volume a replica would have relieved. The replica is here to be promoted,
+  # not queried.
+  # ------------------------------------------------------------------
+  postgres-replica:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: [ha]
+    environment:
+      PRIMARY_HOST: postgres
+      PRIMARY_PORT: 5432
+      POSTGRES_REPLICATION_USER: replicator
+      # pg_basebackup reads PGPASSWORD; there is no other way to give it one
+      # non-interactively.
+      PGPASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-replicator}
+      REPLICATION_SLOT: standby1
+      # A SUBDIRECTORY of the mount, not the mount itself. pg_basebackup
+      # refuses a non-empty target, and a volume mount point is not reliably
+      # empty — one lost+found is enough to fail the clone.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # `sh script`, not the script directly. Git records the executable bit, but
+    # a clone on Windows or under a restrictive umask can arrive without it, and
+    # an entrypoint that is not executable fails with a bare "permission denied"
+    # that says nothing about why. Invoking the interpreter does not care.
+    entrypoint: ["sh", "/usr/local/bin/standby-entrypoint.sh"]
+    volumes:
+      - retailstore-2n-postgres-replica:/var/lib/postgresql/data
+      - ./docker/postgres/standby-entrypoint.sh:/usr/local/bin/standby-entrypoint.sh:ro
+    ports:
+      # 5434, so the replication demo and psql can reach both ends from the host.
+      - "5434:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # -U replicator would fail: that role cannot connect to a database, only
+      # stream WAL. pg_isready only needs the server to answer.
+      test: ["CMD-SHELL", "pg_isready -U retailstore_2n -d retailstore_2n"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   # Shared ephemeral state — rate-limit counters, and nothing else.
   #
   # NO VOLUME, deliberately. Nothing in here is allowed to matter after a
@@ -297,3 +356,6 @@ services:
 volumes:
   retailstore-2n-postgres:
   retailstore-2n-minio:
+  # Separate volume, obviously — a standby sharing the primary's data directory
+  # is two servers writing to one set of files, which corrupts both.
+  retailstore-2n-postgres-replica:

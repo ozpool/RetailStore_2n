@@ -1,0 +1,46 @@
+# Context for the all-in-one image at ./Dockerfile, whose context is the whole
+# repository rather than one app directory.
+#
+# This file is not housekeeping. The entire context is uploaded to the daemon
+# before the build starts, so a missed entry means both node_modules trees are
+# copied on every build and the layer cache is invalidated by files the image
+# never opens.
+
+**/node_modules
+
+# Built inside the image. A host .next contains absolute paths from the
+# developer's machine and would be silently wrong; a host dist is stale by
+# definition.
+frontend/.next
+frontend/out
+backend/dist
+
+# Generated inside the image by `prisma generate`. A host-generated client is
+# built for the developer's platform.
+backend/src/generated
+
+# Tests and their artefacts. Playwright alone is ~400MB installed and exists
+# only for the browser suites.
+backend/tests
+backend/scripts
+backend/probe-*.ts
+backend/verify-*.ts
+
+# Real secrets. The image reads its configuration from the environment.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Seller uploads live in object storage, or on a volume — never in the image.
+backend/uploads
+
+# Nothing here is read by a build.
+.git
+.github
+docs
+k8s
+*.md
+!frontend/README.md
+
+npm-debug.log*
+.DS_Store

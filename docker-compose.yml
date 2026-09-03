@@ -233,6 +233,80 @@ services:
       - ./docker/minio/minio-init.sh:/usr/local/bin/minio-init.sh:ro
     restart: "no"
 
+  # ------------------------------------------------------------------
+  # A base backup, on demand. WAL archiving alone restores nothing — recovery
+  # replays the log ONTO a copy, so the oldest recoverable moment is the oldest
+  # base backup still held, not the oldest WAL segment.
+  #
+  #   docker compose run --rm base-backup
+  #
+  # Not scheduled here. Compose has no scheduler and inventing one with a sleep
+  # loop would be a worse cron than cron. In Kubernetes this is a CronJob, and
+  # CloudNativePG expresses it as a `ScheduledBackup`.
+  # ------------------------------------------------------------------
+  base-backup:
+    # Same image as the primary — it already has pg_basebackup and mc.
+    build:
+      context: ./docker/postgres
+    profiles: [tools]
+    environment:
+      PRIMARY_HOST: postgres
+      PRIMARY_PORT: 5432
+      POSTGRES_REPLICATION_USER: replicator
+      PGPASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-replicator}
+      S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-retailstore-2n-backups}
+      MC_HOST_backups: http://${S3_ACCESS_KEY:-retailstore-2n}:${S3_SECRET_KEY:-retailstore-2n-dev-secret}@minio:9000
+    entrypoint: ["sh", "/usr/local/bin/base-backup.sh"]
+    volumes:
+      - ./docker/postgres/base-backup.sh:/usr/local/bin/base-backup.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------------------------
+  # Point-in-time recovery, into a SECOND database on port 5435.
+  #
+  #   RECOVERY_TARGET_TIME='2026-09-03 08:40:00+00'   #     docker compose --profile tools up -d restore
+  #
+  # Not over the live one, deliberately: a rehearsal that causes an outage is a
+  # rehearsal nobody performs. This comes up as an ordinary database that
+  # happens to hold the past, so the result can be queried and compared.
+  #
+  # The real incident procedure is the same script pointed at the primary's
+  # data directory.
+  # ------------------------------------------------------------------
+  restore:
+    build:
+      context: ./docker/postgres
+    profiles: [tools]
+    environment:
+      # A SUBDIRECTORY of the mount: restore.sh wipes PGDATA before unpacking,
+      # and a volume mount point is not reliably empty.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: retailstore_2n
+      POSTGRES_PASSWORD: retailstore_2n
+      POSTGRES_DB: retailstore_2n
+      S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-retailstore-2n-backups}
+      RECOVERY_TARGET_TIME: ${RECOVERY_TARGET_TIME:-}
+      MC_HOST_backups: http://${S3_ACCESS_KEY:-retailstore-2n}:${S3_SECRET_KEY:-retailstore-2n-dev-secret}@minio:9000
+    entrypoint: ["sh", "/usr/local/bin/restore.sh"]
+    volumes:
+      - ./docker/postgres/restore.sh:/usr/local/bin/restore.sh:ro
+      # NOT a named volume. Every drill must start from nothing — a leftover
+      # data directory would be restored *over*, and a stale one that happened
+      # to start would look like a successful recovery of the wrong instant.
+      - type: tmpfs
+        target: /var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
   # Runs the migration history and exits. `api` depends on it completing.
   migrate:
     build:

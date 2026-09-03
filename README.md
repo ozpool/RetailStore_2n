@@ -1,5 +1,6 @@
 # RetailStore_2n
 
+[![CI](https://github.com/ozpool/RetailStore_2n/actions/workflows/ci.yml/badge.svg)](https://github.com/ozpool/RetailStore_2n/actions/workflows/ci.yml)
 
 RetailStore_2n — repaired, not hidden. Wear and repairs are treated as part of
 an item's history instead of something to hide.

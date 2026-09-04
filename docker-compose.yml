@@ -290,6 +290,31 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Channel workers — one consumer group each, all in one container for now.
+  # A real deployment runs one container per group so email and SMS scale
+  # separately; phase 1 has a single consumer, so that would be three containers
+  # doing one thing.
+  worker:
+    build:
+      context: .
+      target: worker
+    restart: unless-stopped
+    profiles: [messaging]
+    environment:
+      DATABASE_URL: postgresql://retailstore_2n:retailstore_2n@postgres:5432/retailstore_2n
+      NOTIFY_TRANSPORT: kafka
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_REPLICATION_FACTOR: ${KAFKA_REPLICATION_FACTOR:-1}
+      KAFKA_MIN_INSYNC_REPLICAS: ${KAFKA_MIN_INSYNC_REPLICAS:-1}
+      JWT_SECRET: ${JWT_SECRET:-compose-only-not-a-real-secret-000000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   # ------------------------------------------------------------------
   # Object storage for uploaded photos.
   #

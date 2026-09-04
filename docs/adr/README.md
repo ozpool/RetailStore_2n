@@ -42,6 +42,7 @@ the old one, rather than an edit.
 | [0023](0023-one-dockerfile-many-targets.md) | One Dockerfile with a target per image; the all-in-one was built and removed | Accepted |
 | [0024](0024-outbox-not-dual-writes.md) | Transactional outbox, not dual writes | Accepted |
 | [0025](0025-kafka-topics-and-partitioning.md) | One topic keyed by user, consumer groups as fan-out, retries on delay topics | Accepted |
+| [0026](0026-delivery-idempotency.md) | A delivery ledger, claimed before the provider is called | Accepted |
 
 
 ## Adding one

@@ -243,6 +243,7 @@ model User {
   wishlist          WishlistItem[]
   addresses         Address[]
   notifications     Notification[]
+  notificationPrefs NotificationPreference[]
   reportsMade       Report[]                 @relation("ReportsMade")
   moderationActions ModerationAction[]       @relation("ModeratorActions")
 
@@ -351,6 +352,108 @@ model OutboxEvent {
 
   @@index([publishedAt, createdAt])
   @@map("outbox_events")
+}
+
+/// Where a notification can be sent, beyond the app itself.
+enum DeliveryChannel {
+  EMAIL
+  PUSH
+  SMS
+}
+
+/// How one delivery went.
+///
+/// SUPPRESSED IS AN OUTCOME, NOT AN ABSENCE. A message not sent because the
+/// recipient turned that channel off is recorded rather than dropped. Without
+/// the row, "why did I not get an email about my refund?" can only be answered
+/// by reasoning about what the preferences WOULD have evaluated to at a past
+/// moment, from preferences that have since been edited.
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+}
+
+/// Which channels actually delivered one event, and what the provider said.
+///
+/// KAFKA AND THE OUTBOX BOTH DELIVER AT LEAST ONCE, BY DESIGN.
+/// The relay publishes and then marks publishedAt, so a crash between the two
+/// republishes. A consumer that sends and then dies before committing its
+/// offset reprocesses on restart. A rebalance during a deploy hands a partition
+/// back at the last committed offset. All three are ordinary operational
+/// events, not failures — exactly as Stripe webhook redeliveries are.
+///
+/// The unique constraint below is what stops any of them becoming a second
+/// email, or a second SMS to somebody's phone at 3am. The row is inserted
+/// BEFORE the provider is called, so the insert IS the claim: same discipline
+/// as claiming an order before charging it. Checking first and inserting after
+/// would reintroduce the read-then-write race of ADR 0012.
+///
+/// See docs/adr/0026-delivery-idempotency.md
+model NotificationDelivery {
+  id      String          @id @default(uuid())
+  /// Matches OutboxEvent.eventId. Not a foreign key: a delivery record must
+  /// outlive the outbox row, which is pruned once published.
+  eventId String
+  channel DeliveryChannel
+  status  DeliveryStatus  @default(PENDING)
+
+  /// Who it went to, for the admin panel's "did they get it?" question.
+  userId String
+
+  /// The notification this delivered, kept so a support query can join the two.
+  notificationId String?
+
+  /// A REFERENCE to the provider's message, never its content. Same rule as the
+  /// payment and KYC fields: this table records that something was sent, not
+  /// what it said.
+  providerMessageId String?
+
+  attempts       Int     @default(0)
+  lastError      String?
+  /// Why nothing was sent. Set when status is SUPPRESSED, and also when
+  /// DEFERRED — in that case it names the window that is holding it.
+  suppressReason String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  /// THE IDEMPOTENCY GUARD. A redelivery collides here and stops.
+  @@unique([eventId, channel])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("notification_deliveries")
+}
+
+/// An explicit opt-in or opt-out, per event type per channel.
+///
+/// ABSENT MEANS "USE THE DEFAULT FOR THIS TYPE" — see lib/channelPolicy.ts.
+/// Storing only the deviations is what keeps a new NotificationType from
+/// needing a backfill across every user before it can be sent at all, and stops
+/// 11 x 3 rows per account existing purely to say "they never opened settings".
+///
+/// PER TYPE AND PER CHANNEL, NOT PER CHANNEL ALONE. A single "email me" switch
+/// is too coarse in a way that matters: somebody who finds review notifications
+/// noisy would turn email off, and that same switch carries REFUND_ISSUED. The
+/// setting that solves a minor annoyance would silently disable the notice
+/// about their money.
+///
+/// See docs/adr/0027-notification-consent-and-preferences.md
+model NotificationPreference {
+  id      String           @id @default(uuid())
+  userId  String
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type    NotificationType
+  channel DeliveryChannel
+  enabled Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, type, channel])
+  @@index([userId])
+  @@map("notification_preferences")
 }
 
 /// Someone flagging something.

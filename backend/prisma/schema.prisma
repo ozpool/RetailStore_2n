@@ -287,6 +287,72 @@ model Notification {
   @@map("notifications")
 }
 
+/// A domain event, written in the SAME TRANSACTION as the notification above.
+///
+/// WHY THIS TABLE EXISTS
+/// Delivering a notification by email, push, or SMS means publishing it
+/// somewhere. Publishing from inside notify() would be a dual write: two
+/// systems, no transaction spanning them, and no ordering of the two that
+/// survives a crash in between. Row first, publish second, and the crash loses
+/// the event with nothing recording that a publish was owed. Publish first, row
+/// second, and a rolled-back transaction has already emailed somebody about a
+/// sale that did not happen.
+///
+/// This row removes the gap: it commits with the notification or not at all,
+/// and a relay publishes only what is already durable. Same discipline as
+/// claim-then-charge — one system decides atomically, the external call comes
+/// after. See docs/adr/0024-outbox-not-dual-writes.md
+///
+/// PUBLISHING IS AT-LEAST-ONCE, DELIBERATELY
+/// The relay publishes and then sets publishedAt. A crash between those two
+/// republishes on the next pass. That is the correct trade — a duplicate is
+/// recoverable and a lost notification is not — and it is why consumers
+/// deduplicate on eventId rather than trusting delivery.
+/// See docs/adr/0026-delivery-idempotency.md
+model OutboxEvent {
+  id String @id @default(uuid())
+
+  /// The consumer's dedupe key. Generated once, here, inside the transaction —
+  /// never regenerated. Every republish by the relay and every redelivery by
+  /// the broker carries this same value, which is the only reason deduplication
+  /// downstream can work at all.
+  eventId String @unique
+
+  /// What this event is about. Not a foreign key: an event has to survive the
+  /// thing it describes being deleted, the same reasoning as Report.targetId.
+  aggregateType String
+  aggregateId   String
+
+  type NotificationType
+
+  /// The partition key, denormalised so the relay never joins to find it.
+  /// The relay's query has to stay a single index scan over unpublished rows.
+  userId String
+
+  /// What a channel worker needs in order to render and send: the notification
+  /// id, its title, body, and link. A snapshot for the same reason the
+  /// notification's own text is one — it must not re-derive from rows that may
+  /// since have changed or gone.
+  payload Json
+
+  createdAt DateTime @default(now())
+
+  /// Null means unpublished. This is the relay's entire working set, and the
+  /// hand-added partial index in the migration is what keeps it cheap once the
+  /// published rows outnumber the pending ones by a few orders of magnitude.
+  publishedAt DateTime?
+
+  /// Diagnostics for a row the relay keeps failing to publish. Written on a
+  /// best-effort basis after a failed batch, outside the rolled-back
+  /// transaction — so a broker outage is visible in the table rather than only
+  /// in a log nobody is tailing.
+  attempts  Int     @default(0)
+  lastError String?
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+}
+
 /// Someone flagging something.
 ///
 /// The target is a type plus a bare id, NOT a foreign key. A report has to

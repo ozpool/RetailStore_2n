@@ -12,6 +12,7 @@ import { assertKycConfigured } from "./lib/kycProvider";
 import { assertProviderConfigured } from "./lib/paymentProvider";
 import { assertMailConfigured } from "./lib/mailer";
 import { assertRateLimitStore } from "./lib/rateLimit";
+import { relayEnabledInProcess, startRelay } from "./lib/relay";
 import { startReservationSweeper } from "./lib/reservations";
 import { ordersRouter } from "./routes/orders";
 import { addressesRouter } from "./routes/addresses";

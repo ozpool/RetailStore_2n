@@ -12,6 +12,7 @@ import { assertKycConfigured } from "./lib/kycProvider";
 import { assertProviderConfigured } from "./lib/paymentProvider";
 import { assertMailConfigured } from "./lib/mailer";
 import { assertNotifyConfigured, notifyTransportKind } from "./lib/notifyTransport";
+import { assertPushConfigured } from "./lib/push";
 import { assertRateLimitStore } from "./lib/rateLimit";
 import { relayEnabledInProcess, startRelay } from "./lib/relay";
 import { startReservationSweeper } from "./lib/reservations";
@@ -118,6 +119,10 @@ app.listen(PORT, () => {
   console.log(`Identity: ${kycSummary}`);
   console.log(`Email:    ${mailSummary}`);
   console.log(`Notify:   ${notifySummary}`);
+  // Not fatal, same policy as Redis and object storage: an unconfigured push
+  // channel is a missing feature, not a broken server. Printed loudly so
+  // nobody has to guess why nothing arrives.
+  console.log(`Push:     ${assertPushConfigured()}`);
 
   /**
    * Reported after binding, not before.

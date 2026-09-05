@@ -244,6 +244,7 @@ model User {
   addresses         Address[]
   notifications     Notification[]
   notificationPrefs NotificationPreference[]
+  pushSubscriptions PushSubscription[]
   reportsMade       Report[]                 @relation("ReportsMade")
   moderationActions ModerationAction[]       @relation("ModeratorActions")
 
@@ -454,6 +455,48 @@ model NotificationPreference {
   @@unique([userId, type, channel])
   @@index([userId])
   @@map("notification_preferences")
+}
+
+/// A browser that agreed to receive push notifications.
+///
+/// ONE ROW PER BROWSER PROFILE, NOT PER USER. Somebody signed in on a laptop
+/// and a phone has two, and both should ring. A row per user would silently
+/// mean "the last device that subscribed", and the failure — notifications
+/// going to the device you are not holding — is invisible from the server.
+///
+/// WEB PUSH RATHER THAN FCM OR APNs
+/// There is no mobile app: no store listing, no native build, no signing
+/// certificates. Web Push works in the browser that is already open, and the
+/// same subscription covers desktop and Android. iOS supports it for pages
+/// added to the home screen, which is the honest limit of this approach.
+///
+/// NOTHING HERE IS A SECRET OF OURS. `endpoint`, `p256dh` and `auth` are issued
+/// by the browser's own push service and are useless without the VAPID private
+/// key, which lives in the environment and never in this database.
+model PushSubscription {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The push service's URL for this browser. Unique because a browser
+  /// regenerates its subscription on resubscribe, and a stale duplicate would
+  /// deliver the same notification twice to one device.
+  endpoint String @unique
+  /// The browser's public key and auth secret, for payload encryption.
+  p256dh   String
+  auth     String
+
+  /// Only to make a device list legible ("Chrome on Windows"). Never parsed
+  /// for behaviour — user agents lie, and a notification that renders
+  /// differently per browser string is a bug waiting to happen.
+  userAgent String?
+
+  createdAt  DateTime @default(now())
+  /// Touched on every successful send, so a device list can show what is live.
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 /// Someone flagging something.

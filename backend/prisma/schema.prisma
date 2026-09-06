@@ -239,6 +239,36 @@ model User {
   /// the comparison is exact: two codes from the same period are the same code.
   totpLastUsedAt  DateTime?
 
+  /// SMS CONTACT. Three columns, because "we have a number" and "we are
+  /// allowed to text it" are different facts and conflating them is how an
+  /// unverified number gets messaged.
+  ///
+  /// E.164, always — "+447700900123". Normalised on the way in so a number
+  /// typed four different ways is one row, and so the provider is never handed
+  /// something it has to guess about.
+  ///
+  /// UNIQUE, and this is a judgement call with a real cost. A verified phone
+  /// is an identity signal, and one number verifying unlimited accounts
+  /// destroys it — that is the abuse this prevents. The cost is that a number
+  /// held by a suspended account cannot be reused by its owner elsewhere,
+  /// which is a support ticket rather than a security hole. Postgres allows
+  /// many NULLs in a unique column, so accounts without a number are
+  /// unaffected.
+  ///
+  /// NEVER POPULATED FROM Address.phone. That field is a delivery contact for
+  /// a parcel, unverified, and frequently a third party's number — see
+  /// docs/adr/0027-notification-consent-and-preferences.md
+  phone              String?             @unique
+  /// Null until a code sent to that number came back. Nothing is EVER sent to
+  /// a number whose value here is null; the column is the gate.
+  phoneVerifiedAt    DateTime?
+  /// When they agreed to be texted, recorded separately from verification
+  /// because proving a number works is not the same as agreeing to receive
+  /// messages on it — and it is the consent, not the verification, that has to
+  /// be produced if anyone asks.
+  smsConsentAt       DateTime?
+  phoneVerifications PhoneVerification[]
+
   orders            Order[]
   wishlist          WishlistItem[]
   addresses         Address[]
@@ -425,6 +455,47 @@ model NotificationDelivery {
   @@index([userId, createdAt])
   @@index([status, createdAt])
   @@map("notification_deliveries")
+}
+
+/// A code sent to a phone, to prove whoever holds the account holds the number.
+///
+/// MIRRORS EmailVerificationToken DELIBERATELY — hashed, single-use, expiring —
+/// with three differences, each forced by the fact that this is six digits and
+/// not 32 random bytes.
+///
+/// SHORTER EXPIRY. An email link needs an inbox to reach. An SMS code appears
+/// on a lock screen, readable by anyone holding the handset, so it lives for
+/// minutes rather than a day.
+///
+/// AN ATTEMPT COUNTER. A 32-byte token cannot be guessed; a six-digit code is
+/// one of a million, and a few thousand tries would find it. The counter caps
+/// the guesses against ONE code, and the rate limiter caps how fast codes can
+/// be requested — both are needed, because either alone leaves a way through.
+///
+/// THE NUMBER LIVES HERE, NOT ON User, UNTIL IT IS PROVEN. Writing the number
+/// to User at request time would mean an unverified number sitting in the field
+/// that governs delivery, one bug away from being texted.
+model PhoneVerification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The E.164 number this code was sent to, held here until it is proven.
+  phone    String
+  /// SHA-256, like every other token in this schema. A code readable from a
+  /// database dump is a code that can be used from one.
+  codeHash String
+
+  /// Wrong guesses against THIS code. Past the cap the row is spent, so
+  /// guessing costs a fresh code and therefore a fresh rate-limit slot.
+  attempts Int @default(0)
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@map("phone_verifications")
 }
 
 /// An explicit opt-in or opt-out, per event type per channel.

@@ -404,6 +404,12 @@ enum DeliveryStatus {
   SENT
   FAILED
   SUPPRESSED
+  /// Not sent yet, and not a failure: quiet hours. The row carries notBefore
+  /// and a sweeper picks it up once that passes. Distinct from SUPPRESSED
+  /// because SUPPRESSED is terminal — collapsing the two would mean the only
+  /// honest thing to tell somebody at 8am is that their notification was
+  /// dropped at 3am.
+  DEFERRED
 }
 
 /// Which channels actually delivered one event, and what the provider said.
@@ -447,6 +453,14 @@ model NotificationDelivery {
   /// DEFERRED — in that case it names the window that is holding it.
   suppressReason String?
 
+  /// The earliest this may be sent. Only set when status is DEFERRED.
+  ///
+  /// A timestamp rather than a flag, because the sweeper's whole query is
+  /// "what is due now". A flag would make it "what is deferred, then work out
+  /// which of those are due" — a scan that grows with everything ever
+  /// deferred rather than with what is actually owed.
+  notBefore DateTime?
+
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 
@@ -454,6 +468,8 @@ model NotificationDelivery {
   @@unique([eventId, channel])
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  /// The sweeper's query, and the only reason it does not scan the table.
+  @@index([status, notBefore])
   @@map("notification_deliveries")
 }
 

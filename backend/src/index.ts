@@ -7,6 +7,7 @@ import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
 import { profileRouter } from "./routes/profile";
+import { startDeferredSweeper } from "./lib/deferredDeliveries";
 import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertProviderConfigured } from "./lib/paymentProvider";
@@ -167,6 +168,16 @@ app.listen(PORT, () => {
   //   unpaid orders hold stock, and their listing is hidden from the catalog
   //   in-flight payments whose request died need settling against the provider
   startOrderSweeper();
+
+  /**
+   * And a third, for the same reason: a message parked by quiet hours is owed
+   * to somebody and nothing in the request path will ever go looking for it.
+   *
+   * Runs on every API replica. That is safe rather than wasteful — the claim
+   * is a conditional UPDATE on the row, so N sweepers divide the work instead
+   * of sending it N times, exactly as N relays divide the outbox.
+   */
+  startDeferredSweeper();
 
   /**
    * The outbox relay, but ONLY on the inline transport.

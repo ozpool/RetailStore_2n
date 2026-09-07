@@ -8,6 +8,8 @@ import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
 import { profileRouter } from "./routes/profile";
 import { startDeferredSweeper } from "./lib/deferredDeliveries";
+import { startOutboxRetentionSweeper } from "./lib/outboxRetention";
+import { startStalePendingSweeper } from "./lib/stalePending";
 import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertProviderConfigured } from "./lib/paymentProvider";
@@ -15,6 +17,7 @@ import { assertMailConfigured } from "./lib/mailer";
 import { assertNotifyConfigured, notifyTransportKind } from "./lib/notifyTransport";
 import { assertPushConfigured } from "./lib/push";
 import { assertSmsConfigured } from "./lib/smsProvider";
+import { lagReport } from "./lib/consumerLag";
 import { assertRateLimitStore } from "./lib/rateLimit";
 import { relayEnabledInProcess, startRelay } from "./lib/relay";
 import { startReservationSweeper } from "./lib/reservations";
@@ -73,6 +76,30 @@ if (storageDriver() === "disk") {
     })
   );
 }
+
+/**
+ * Is anyone actually receiving notifications?
+ *
+ * SEPARATE FROM /health, AND DELIBERATELY SO. `/health` answers "is this
+ * process alive" and has to stay cheap enough for a load balancer to call every
+ * second. This one talks to a broker over the network, so it belongs behind its
+ * own path where a slow answer degrades a dashboard rather than a deploy.
+ *
+ * 503 WHEN UNHEALTHY, because a monitor should not have to parse a body to know
+ * something is wrong. The body says which group and which topic.
+ */
+app.get("/health/lag", async (_req, res) => {
+  try {
+    const report = await lagReport();
+    res.status(report.healthy ? 200 : 503).json(report);
+  } catch (err) {
+    // Reaching here means lagReport itself threw, which it is written not to.
+    res.status(503).json({
+      healthy: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "retailstore-2n-backend" });
@@ -178,6 +205,20 @@ app.listen(PORT, () => {
    * of sending it N times, exactly as N relays divide the outbox.
    */
   startDeferredSweeper();
+
+  /**
+   * And two more, both recovering state nothing in the request path reaches.
+   *
+   * The stale-pending one closes the ambiguous middle of ADR 0026: a consumer
+   * killed between claiming a delivery and settling it leaves a row that, left
+   * alone, is a notification lost behind something that looks like proof it was
+   * sent.
+   *
+   * Retention keeps `outbox_events` from growing without bound, which it has
+   * done since the outbox landed.
+   */
+  startStalePendingSweeper();
+  startOutboxRetentionSweeper();
 
   /**
    * The outbox relay, but ONLY on the inline transport.

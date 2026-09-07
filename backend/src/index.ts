@@ -7,11 +7,19 @@ import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
 import { profileRouter } from "./routes/profile";
+import { startDeferredSweeper } from "./lib/deferredDeliveries";
+import { startOutboxRetentionSweeper } from "./lib/outboxRetention";
+import { startStalePendingSweeper } from "./lib/stalePending";
 import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
 import { assertProviderConfigured } from "./lib/paymentProvider";
 import { assertMailConfigured } from "./lib/mailer";
+import { assertNotifyConfigured, notifyTransportKind } from "./lib/notifyTransport";
+import { assertPushConfigured } from "./lib/push";
+import { assertSmsConfigured } from "./lib/smsProvider";
+import { lagReport } from "./lib/consumerLag";
 import { assertRateLimitStore } from "./lib/rateLimit";
+import { relayEnabledInProcess, startRelay } from "./lib/relay";
 import { startReservationSweeper } from "./lib/reservations";
 import { ordersRouter } from "./routes/orders";
 import { addressesRouter } from "./routes/addresses";
@@ -69,6 +77,30 @@ if (storageDriver() === "disk") {
   );
 }
 
+/**
+ * Is anyone actually receiving notifications?
+ *
+ * SEPARATE FROM /health, AND DELIBERATELY SO. `/health` answers "is this
+ * process alive" and has to stay cheap enough for a load balancer to call every
+ * second. This one talks to a broker over the network, so it belongs behind its
+ * own path where a slow answer degrades a dashboard rather than a deploy.
+ *
+ * 503 WHEN UNHEALTHY, because a monitor should not have to parse a body to know
+ * something is wrong. The body says which group and which topic.
+ */
+app.get("/health/lag", async (_req, res) => {
+  try {
+    const report = await lagReport();
+    res.status(report.healthy ? 200 : 503).json(report);
+  } catch (err) {
+    // Reaching here means lagReport itself threw, which it is written not to.
+    res.status(503).json({
+      healthy: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "retailstore-2n-backend" });
 });
@@ -99,10 +131,14 @@ app.use("/seller", sellerRouter);
 let paymentSummary: string;
 let kycSummary: string;
 let mailSummary: string;
+let notifySummary: string;
+let smsSummary: string;
 try {
   paymentSummary = assertProviderConfigured();
   kycSummary = assertKycConfigured();
   mailSummary = assertMailConfigured();
+  notifySummary = assertNotifyConfigured();
+  smsSummary = assertSmsConfigured();
 } catch (err) {
   console.error(`\nConfiguration error:\n  ${(err as Error).message}\n`);
   process.exit(1);
@@ -113,6 +149,12 @@ app.listen(PORT, () => {
   console.log(`Payments: ${paymentSummary}`);
   console.log(`Identity: ${kycSummary}`);
   console.log(`Email:    ${mailSummary}`);
+  console.log(`Notify:   ${notifySummary}`);
+  console.log(`SMS:      ${smsSummary}`);
+  // Not fatal, same policy as Redis and object storage: an unconfigured push
+  // channel is a missing feature, not a broken server. Printed loudly so
+  // nobody has to guess why nothing arrives.
+  console.log(`Push:     ${assertPushConfigured()}`);
 
   /**
    * Reported after binding, not before.
@@ -153,4 +195,58 @@ app.listen(PORT, () => {
   //   unpaid orders hold stock, and their listing is hidden from the catalog
   //   in-flight payments whose request died need settling against the provider
   startOrderSweeper();
+
+  /**
+   * And a third, for the same reason: a message parked by quiet hours is owed
+   * to somebody and nothing in the request path will ever go looking for it.
+   *
+   * Runs on every API replica. That is safe rather than wasteful — the claim
+   * is a conditional UPDATE on the row, so N sweepers divide the work instead
+   * of sending it N times, exactly as N relays divide the outbox.
+   */
+  startDeferredSweeper();
+
+  /**
+   * And two more, both recovering state nothing in the request path reaches.
+   *
+   * The stale-pending one closes the ambiguous middle of ADR 0026: a consumer
+   * killed between claiming a delivery and settling it leaves a row that, left
+   * alone, is a notification lost behind something that looks like proof it was
+   * sent.
+   *
+   * Retention keeps `outbox_events` from growing without bound, which it has
+   * done since the outbox landed.
+   */
+  startStalePendingSweeper();
+  startOutboxRetentionSweeper();
+
+  /**
+   * The outbox relay, but ONLY on the inline transport.
+   *
+   * Under inline there is no broker: the relay hands events straight to the
+   * consumer functions, so a second container for a function call would be
+   * ceremony. Development and the test suite stay one process.
+   *
+   * Under kafka it runs as its own program (src/relay.ts) instead — it is on
+   * the critical path of every notification and has to scale separately from
+   * the API. Starting it here too would mean two relays racing, which is safe
+   * (FOR UPDATE SKIP LOCKED) but means scaling the API silently scales
+   * publishing with it. See docs/adr/0024-outbox-not-dual-writes.md
+   */
+  /**
+   * ...unless it is switched off, which exists for exactly one reason.
+   *
+   * `tests/api/outbox.ts` drives `relayOnce()` by hand and registers its own
+   * spy consumer IN THE TEST PROCESS, so that every relay pass happens exactly
+   * when that file says it does. A relay ticking in the API steals those rows
+   * and hands them to the API's consumers instead — the suite then reports
+   * "one event published — 0", which is true and completely misleading.
+   *
+   * It only bites during a full `npm test`, where the API has to be up for the
+   * other suites. Nothing else in the suite needs this relay: the delivery
+   * suites call the consumers directly.
+   */
+  if (notifyTransportKind() === "inline" && relayEnabledInProcess()) {
+    startRelay();
+  }
 });

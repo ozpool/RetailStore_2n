@@ -239,10 +239,42 @@ model User {
   /// the comparison is exact: two codes from the same period are the same code.
   totpLastUsedAt  DateTime?
 
+  /// SMS CONTACT. Three columns, because "we have a number" and "we are
+  /// allowed to text it" are different facts and conflating them is how an
+  /// unverified number gets messaged.
+  ///
+  /// E.164, always — "+447700900123". Normalised on the way in so a number
+  /// typed four different ways is one row, and so the provider is never handed
+  /// something it has to guess about.
+  ///
+  /// UNIQUE, and this is a judgement call with a real cost. A verified phone
+  /// is an identity signal, and one number verifying unlimited accounts
+  /// destroys it — that is the abuse this prevents. The cost is that a number
+  /// held by a suspended account cannot be reused by its owner elsewhere,
+  /// which is a support ticket rather than a security hole. Postgres allows
+  /// many NULLs in a unique column, so accounts without a number are
+  /// unaffected.
+  ///
+  /// NEVER POPULATED FROM Address.phone. That field is a delivery contact for
+  /// a parcel, unverified, and frequently a third party's number — see
+  /// docs/adr/0027-notification-consent-and-preferences.md
+  phone              String?             @unique
+  /// Null until a code sent to that number came back. Nothing is EVER sent to
+  /// a number whose value here is null; the column is the gate.
+  phoneVerifiedAt    DateTime?
+  /// When they agreed to be texted, recorded separately from verification
+  /// because proving a number works is not the same as agreeing to receive
+  /// messages on it — and it is the consent, not the verification, that has to
+  /// be produced if anyone asks.
+  smsConsentAt       DateTime?
+  phoneVerifications PhoneVerification[]
+
   orders            Order[]
   wishlist          WishlistItem[]
   addresses         Address[]
   notifications     Notification[]
+  notificationPrefs NotificationPreference[]
+  pushSubscriptions PushSubscription[]
   reportsMade       Report[]                 @relation("ReportsMade")
   moderationActions ModerationAction[]       @relation("ModeratorActions")
 
@@ -285,6 +317,273 @@ model Notification {
   @@index([userId, readAt])
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// A domain event, written in the SAME TRANSACTION as the notification above.
+///
+/// WHY THIS TABLE EXISTS
+/// Delivering a notification by email, push, or SMS means publishing it
+/// somewhere. Publishing from inside notify() would be a dual write: two
+/// systems, no transaction spanning them, and no ordering of the two that
+/// survives a crash in between. Row first, publish second, and the crash loses
+/// the event with nothing recording that a publish was owed. Publish first, row
+/// second, and a rolled-back transaction has already emailed somebody about a
+/// sale that did not happen.
+///
+/// This row removes the gap: it commits with the notification or not at all,
+/// and a relay publishes only what is already durable. Same discipline as
+/// claim-then-charge — one system decides atomically, the external call comes
+/// after. See docs/adr/0024-outbox-not-dual-writes.md
+///
+/// PUBLISHING IS AT-LEAST-ONCE, DELIBERATELY
+/// The relay publishes and then sets publishedAt. A crash between those two
+/// republishes on the next pass. That is the correct trade — a duplicate is
+/// recoverable and a lost notification is not — and it is why consumers
+/// deduplicate on eventId rather than trusting delivery.
+/// See docs/adr/0026-delivery-idempotency.md
+model OutboxEvent {
+  id String @id @default(uuid())
+
+  /// The consumer's dedupe key. Generated once, here, inside the transaction —
+  /// never regenerated. Every republish by the relay and every redelivery by
+  /// the broker carries this same value, which is the only reason deduplication
+  /// downstream can work at all.
+  eventId String @unique
+
+  /// What this event is about. Not a foreign key: an event has to survive the
+  /// thing it describes being deleted, the same reasoning as Report.targetId.
+  aggregateType String
+  aggregateId   String
+
+  type NotificationType
+
+  /// The partition key, denormalised so the relay never joins to find it.
+  /// The relay's query has to stay a single index scan over unpublished rows.
+  userId String
+
+  /// What a channel worker needs in order to render and send: the notification
+  /// id, its title, body, and link. A snapshot for the same reason the
+  /// notification's own text is one — it must not re-derive from rows that may
+  /// since have changed or gone.
+  payload Json
+
+  createdAt DateTime @default(now())
+
+  /// Null means unpublished. This is the relay's entire working set, and the
+  /// hand-added partial index in the migration is what keeps it cheap once the
+  /// published rows outnumber the pending ones by a few orders of magnitude.
+  publishedAt DateTime?
+
+  /// Diagnostics for a row the relay keeps failing to publish. Written on a
+  /// best-effort basis after a failed batch, outside the rolled-back
+  /// transaction — so a broker outage is visible in the table rather than only
+  /// in a log nobody is tailing.
+  attempts  Int     @default(0)
+  lastError String?
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+}
+
+/// Where a notification can be sent, beyond the app itself.
+enum DeliveryChannel {
+  EMAIL
+  PUSH
+  SMS
+}
+
+/// How one delivery went.
+///
+/// SUPPRESSED IS AN OUTCOME, NOT AN ABSENCE. A message not sent because the
+/// recipient turned that channel off is recorded rather than dropped. Without
+/// the row, "why did I not get an email about my refund?" can only be answered
+/// by reasoning about what the preferences WOULD have evaluated to at a past
+/// moment, from preferences that have since been edited.
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+  /// Not sent yet, and not a failure: quiet hours. The row carries notBefore
+  /// and a sweeper picks it up once that passes. Distinct from SUPPRESSED
+  /// because SUPPRESSED is terminal — collapsing the two would mean the only
+  /// honest thing to tell somebody at 8am is that their notification was
+  /// dropped at 3am.
+  DEFERRED
+}
+
+/// Which channels actually delivered one event, and what the provider said.
+///
+/// KAFKA AND THE OUTBOX BOTH DELIVER AT LEAST ONCE, BY DESIGN.
+/// The relay publishes and then marks publishedAt, so a crash between the two
+/// republishes. A consumer that sends and then dies before committing its
+/// offset reprocesses on restart. A rebalance during a deploy hands a partition
+/// back at the last committed offset. All three are ordinary operational
+/// events, not failures — exactly as Stripe webhook redeliveries are.
+///
+/// The unique constraint below is what stops any of them becoming a second
+/// email, or a second SMS to somebody's phone at 3am. The row is inserted
+/// BEFORE the provider is called, so the insert IS the claim: same discipline
+/// as claiming an order before charging it. Checking first and inserting after
+/// would reintroduce the read-then-write race of ADR 0012.
+///
+/// See docs/adr/0026-delivery-idempotency.md
+model NotificationDelivery {
+  id      String          @id @default(uuid())
+  /// Matches OutboxEvent.eventId. Not a foreign key: a delivery record must
+  /// outlive the outbox row, which is pruned once published.
+  eventId String
+  channel DeliveryChannel
+  status  DeliveryStatus  @default(PENDING)
+
+  /// Who it went to, for the admin panel's "did they get it?" question.
+  userId String
+
+  /// The notification this delivered, kept so a support query can join the two.
+  notificationId String?
+
+  /// A REFERENCE to the provider's message, never its content. Same rule as the
+  /// payment and KYC fields: this table records that something was sent, not
+  /// what it said.
+  providerMessageId String?
+
+  attempts       Int     @default(0)
+  lastError      String?
+  /// Why nothing was sent. Set when status is SUPPRESSED, and also when
+  /// DEFERRED — in that case it names the window that is holding it.
+  suppressReason String?
+
+  /// The earliest this may be sent. Only set when status is DEFERRED.
+  ///
+  /// A timestamp rather than a flag, because the sweeper's whole query is
+  /// "what is due now". A flag would make it "what is deferred, then work out
+  /// which of those are due" — a scan that grows with everything ever
+  /// deferred rather than with what is actually owed.
+  notBefore DateTime?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  /// THE IDEMPOTENCY GUARD. A redelivery collides here and stops.
+  @@unique([eventId, channel])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  /// The sweeper's query, and the only reason it does not scan the table.
+  @@index([status, notBefore])
+  @@map("notification_deliveries")
+}
+
+/// A code sent to a phone, to prove whoever holds the account holds the number.
+///
+/// MIRRORS EmailVerificationToken DELIBERATELY — hashed, single-use, expiring —
+/// with three differences, each forced by the fact that this is six digits and
+/// not 32 random bytes.
+///
+/// SHORTER EXPIRY. An email link needs an inbox to reach. An SMS code appears
+/// on a lock screen, readable by anyone holding the handset, so it lives for
+/// minutes rather than a day.
+///
+/// AN ATTEMPT COUNTER. A 32-byte token cannot be guessed; a six-digit code is
+/// one of a million, and a few thousand tries would find it. The counter caps
+/// the guesses against ONE code, and the rate limiter caps how fast codes can
+/// be requested — both are needed, because either alone leaves a way through.
+///
+/// THE NUMBER LIVES HERE, NOT ON User, UNTIL IT IS PROVEN. Writing the number
+/// to User at request time would mean an unverified number sitting in the field
+/// that governs delivery, one bug away from being texted.
+model PhoneVerification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The E.164 number this code was sent to, held here until it is proven.
+  phone    String
+  /// SHA-256, like every other token in this schema. A code readable from a
+  /// database dump is a code that can be used from one.
+  codeHash String
+
+  /// Wrong guesses against THIS code. Past the cap the row is spent, so
+  /// guessing costs a fresh code and therefore a fresh rate-limit slot.
+  attempts Int @default(0)
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@map("phone_verifications")
+}
+
+/// An explicit opt-in or opt-out, per event type per channel.
+///
+/// ABSENT MEANS "USE THE DEFAULT FOR THIS TYPE" — see lib/channelPolicy.ts.
+/// Storing only the deviations is what keeps a new NotificationType from
+/// needing a backfill across every user before it can be sent at all, and stops
+/// 11 x 3 rows per account existing purely to say "they never opened settings".
+///
+/// PER TYPE AND PER CHANNEL, NOT PER CHANNEL ALONE. A single "email me" switch
+/// is too coarse in a way that matters: somebody who finds review notifications
+/// noisy would turn email off, and that same switch carries REFUND_ISSUED. The
+/// setting that solves a minor annoyance would silently disable the notice
+/// about their money.
+///
+/// See docs/adr/0027-notification-consent-and-preferences.md
+model NotificationPreference {
+  id      String           @id @default(uuid())
+  userId  String
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type    NotificationType
+  channel DeliveryChannel
+  enabled Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, type, channel])
+  @@index([userId])
+  @@map("notification_preferences")
+}
+
+/// A browser that agreed to receive push notifications.
+///
+/// ONE ROW PER BROWSER PROFILE, NOT PER USER. Somebody signed in on a laptop
+/// and a phone has two, and both should ring. A row per user would silently
+/// mean "the last device that subscribed", and the failure — notifications
+/// going to the device you are not holding — is invisible from the server.
+///
+/// WEB PUSH RATHER THAN FCM OR APNs
+/// There is no mobile app: no store listing, no native build, no signing
+/// certificates. Web Push works in the browser that is already open, and the
+/// same subscription covers desktop and Android. iOS supports it for pages
+/// added to the home screen, which is the honest limit of this approach.
+///
+/// NOTHING HERE IS A SECRET OF OURS. `endpoint`, `p256dh` and `auth` are issued
+/// by the browser's own push service and are useless without the VAPID private
+/// key, which lives in the environment and never in this database.
+model PushSubscription {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The push service's URL for this browser. Unique because a browser
+  /// regenerates its subscription on resubscribe, and a stale duplicate would
+  /// deliver the same notification twice to one device.
+  endpoint String @unique
+  /// The browser's public key and auth secret, for payload encryption.
+  p256dh   String
+  auth     String
+
+  /// Only to make a device list legible ("Chrome on Windows"). Never parsed
+  /// for behaviour — user agents lie, and a notification that renders
+  /// differently per browser string is a bug waiting to happen.
+  userAgent String?
+
+  createdAt  DateTime @default(now())
+  /// Touched on every successful send, so a device list can show what is live.
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 /// Someone flagging something.

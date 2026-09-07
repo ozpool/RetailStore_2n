@@ -40,6 +40,11 @@ the old one, rather than an edit.
 | [0021](0021-refresh-race-grace-window.md) | Concurrent refresh handled by a grace window in Postgres, not a Redis lock | Accepted |
 | [0022](0022-object-storage-for-uploads.md) | Object storage for uploads; the last thing blocking a second replica | Accepted |
 | [0023](0023-one-dockerfile-many-targets.md) | One Dockerfile with a target per image; the all-in-one was built and removed | Accepted |
+| [0024](0024-outbox-not-dual-writes.md) | Transactional outbox, not dual writes | Accepted |
+| [0025](0025-kafka-topics-and-partitioning.md) | One topic keyed by user, consumer groups as fan-out, retries on delay topics | Accepted |
+| [0026](0026-delivery-idempotency.md) | A delivery ledger, claimed before the provider is called | Accepted |
+| [0027](0027-notification-consent-and-preferences.md) | Consent before delivery: verified numbers, per-type preferences, unsubscribe | Accepted |
+| [0028](0028-sms-provider-twilio-behind-a-seam.md) | Twilio for SMS, behind the same seam as payments and identity | Accepted |
 
 
 ## Adding one

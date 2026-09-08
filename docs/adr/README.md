@@ -45,6 +45,8 @@ the old one, rather than an edit.
 | [0026](0026-delivery-idempotency.md) | A delivery ledger, claimed before the provider is called | Accepted |
 | [0027](0027-notification-consent-and-preferences.md) | Consent before delivery: verified numbers, per-type preferences, unsubscribe | Accepted |
 | [0028](0028-sms-provider-twilio-behind-a-seam.md) | Twilio for SMS, behind the same seam as payments and identity | Accepted |
+| [0029](0029-payouts-separate-transfers-not-destination-charges.md) | Pay sellers with separate transfers, not destination charges | Accepted |
+| [0030](0030-payout-eligibility-and-hold.md) | What makes money payable, and the ledger that stops it being paid twice | Accepted |
 
 
 ## Adding one

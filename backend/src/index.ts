@@ -30,6 +30,7 @@ import { reportsRouter } from "./routes/reports";
 import { reservationsRouter } from "./routes/reservations";
 import { reviewsRouter } from "./routes/reviews";
 import { salesRouter } from "./routes/sales";
+import { sellerPayoutsRouter } from "./routes/sellerPayouts";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
 import { webhooksRouter } from "./routes/webhooks";
 import { wishlistRouter } from "./routes/wishlist";
@@ -120,6 +121,7 @@ app.use("/admin", adminRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.
+app.use("/seller", sellerPayoutsRouter);
 app.use("/seller", sellerVerificationRouter);
 app.use("/seller", salesRouter);
 app.use("/seller", sellerRouter);

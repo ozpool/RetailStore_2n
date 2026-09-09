@@ -47,6 +47,7 @@ the old one, rather than an edit.
 | [0028](0028-sms-provider-twilio-behind-a-seam.md) | Twilio for SMS, behind the same seam as payments and identity | Accepted |
 | [0029](0029-payouts-separate-transfers-not-destination-charges.md) | Pay sellers with separate transfers, not destination charges | Accepted |
 | [0030](0030-payout-eligibility-and-hold.md) | What makes money payable, and the ledger that stops it being paid twice | Accepted |
+| [0031](0031-buyer-initiated-returns.md) | Buyer-initiated returns, as a request the seller answers | Accepted |
 
 
 ## Adding one

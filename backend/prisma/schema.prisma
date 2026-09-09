@@ -385,6 +385,115 @@ model OutboxEvent {
   @@map("outbox_events")
 }
 
+/// How one transfer to one seller went.
+enum PayoutStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+/// One transfer to one seller, covering one or more delivered order items.
+///
+/// THE PAYOUT UNIT IS THE ORDER ITEM, NOT THE ORDER, because a basket can span
+/// sellers (ADR 0014) and each line is shipped and refunded on its own. An
+/// order with four sellers produces four payouts, on four different days.
+///
+/// CLAIMED BEFORE STRIPE IS CALLED, exactly as a charge is (ADR 0013) and a
+/// refund is (ADR 0016). A read-then-transfer version lets two concurrent runs
+/// both read the same balance and both send it, which for a $120 order means
+/// $240 leaving the platform.
+model Payout {
+  id       String        @id @default(uuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  /// The sum of the items below, less any debt netted off at claim time.
+  amountCents Int
+  /// What was withheld from this payout to settle an earlier failed reversal.
+  nettedCents Int    @default(0)
+  currency    String @default("USD")
+
+  status PayoutStatus @default(PENDING)
+
+  /// A REFERENCE to Stripe's transfer, never a copy of its contents — the same
+  /// rule as Order.paymentIntentId and Refund.providerRefundId.
+  provider           String?
+  providerTransferId String? @unique
+  failureReason      String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  items PayoutItem[]
+
+  @@index([sellerId, createdAt])
+  @@index([status])
+  @@map("payouts")
+}
+
+/// Which order items one payout covered, and for how much.
+///
+/// THE IDEMPOTENCY GUARD IS `orderItemId @unique`. An item can appear in at
+/// most one payout, and a second attempt to include an already-paid item
+/// collides at the database rather than relying on the code above it getting
+/// the order of its checks right — the same discipline as the delivery
+/// ledger's @@unique([eventId, channel]) in ADR 0026.
+///
+/// It also answers the question a seller actually asks — "what is this $84
+/// for?" — because these rows name the exact lines.
+model PayoutItem {
+  id       String @id @default(uuid())
+  payoutId String
+  payout   Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+
+  /// Not a foreign key relation on purpose: a payout statement has to stay
+  /// readable after a listing is deleted, and OrderItem.listingId is already
+  /// nullable for that reason.
+  orderItemId String @unique
+
+  /// Snapshotted, for the same reason the shipping address is copied onto an
+  /// order: what the seller was paid must not change when a price does.
+  amountCents Int
+
+  /// Set when a refund arrived after this line had been paid and the transfer
+  /// was reversed. Kept on the item rather than the payout because a refund is
+  /// per line, so only part of a payout may come back.
+  reversedAt         DateTime?
+  providerReversalId String?
+
+  @@index([payoutId])
+  @@map("payout_items")
+}
+
+/// Money a seller owes back, because a refund arrived after they were paid and
+/// the transfer could not be reversed.
+///
+/// The honest floor of a feature nobody wants to build: it is netted off the
+/// seller's next payout and nothing else happens. No invoice, no collections. A
+/// seller who never sells again keeps it, and that is a stated consequence in
+/// ADR 0030 rather than an oversight — recording who owes what is still far
+/// better than a platform silently absorbing it.
+model PayoutDebt {
+  id       String        @id @default(uuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  amountCents Int
+  currency    String @default("USD")
+  reason      String
+
+  /// The line that caused it, for tracing. Not a relation, same reasoning as
+  /// PayoutItem.orderItemId.
+  orderItemId String?
+
+  createdAt DateTime  @default(now())
+  /// Null until a later payout has absorbed it.
+  settledAt DateTime?
+
+  @@index([sellerId, settledAt])
+  @@map("payout_debts")
+}
+
 /// Where a notification can be sent, beyond the app itself.
 enum DeliveryChannel {
   EMAIL
@@ -765,6 +874,30 @@ model SellerProfile {
   /// OUR gate: set only from a recorded identity decision. See ADR 0007 and
   /// lib/verification.ts, which is the single place allowed to write it.
   payoutsEnabled Boolean @default(false)
+
+  /// STRIPE'S gate, mirrored from the connected account's `payouts_enabled`
+  /// capability by the account.updated webhook.
+  ///
+  /// TWO FLAGS, NOT ONE, AND THEY ANSWER DIFFERENT QUESTIONS.
+  /// payoutsEnabled is "is this person who they say they are", which is a
+  /// moderation decision this platform owns. This one is "will Stripe move
+  /// money to that bank account" — sanctions screening, tax status, bank
+  /// details — which this platform cannot overrule and must not try to.
+  ///
+  /// Collapsing them would mean one of two failures: paying out to an account
+  /// Stripe will reject, or letting a payments provider quietly reinstate a
+  /// seller that moderation had blocked. Both must be true before a transfer
+  /// is attempted. See docs/adr/0030-payout-eligibility-and-hold.md
+  payoutsReady Boolean @default(false)
+
+  /// The connected account. Unique because two sellers sharing one payout
+  /// destination is either a mistake or fraud, and the constraint is the only
+  /// thing that would notice.
+  connectAccountId   String?   @unique
+  connectOnboardedAt DateTime?
+
+  payouts Payout[]
+  debts   PayoutDebt[]
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt

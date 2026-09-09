@@ -622,6 +622,138 @@ webhook rather than a client submission.
 
 ---
 
+## Payouts — `/seller/payouts` 🔒🏪
+
+Buyers pay the platform; the platform pays sellers afterwards. Separate charges
+and transfers, never destination charges — [ADR 0029](adr/0029-payouts-separate-transfers-not-destination-charges.md).
+
+**Every route here returns `403 PAYOUTS_LOCKED`** (with `kycStatus`) until the
+seller's identity is verified. That gate predates the pipeline
+([ADR 0007](adr/0007-verification-gates-payouts.md)) and covers onboarding as
+well as payment: creating a connected account is a real account at a real
+provider under somebody's name, and doing that before checking who they are is
+the wrong order.
+
+`PAYOUT_PROVIDER=stub|stripe_connect`. Under `stub` nothing reaches Stripe and
+no money moves; responses carry `isStub: true` so the UI can say so.
+
+### `GET /seller/payouts`
+
+Everything the seller page needs in one request.
+
+```json
+{
+  "summary": {
+    "currency": "USD",
+    "paidCents": 12000, "payableCents": 5000, "heldCents": 3000,
+    "heldUntil": "2026-09-15T00:00:00.000Z",
+    "withheldCents": 0, "inFlightCents": 0,
+    "notEarnedCents": 2000, "debtCents": 0,
+    "gates": { "payoutsEnabled": true, "payoutsReady": true, "onboarded": true }
+  },
+  "holdDays": 7,
+  "payable": [
+    { "orderItemId": "…", "orderId": "…", "title": "A mended plate",
+      "amountCents": 5000, "deliveredAt": "2026-08-20T…" }
+  ],
+  "history": [
+    { "id": "…", "amountCents": 12000, "nettedCents": 0, "currency": "USD",
+      "status": "PAID", "failureReason": null,
+      "createdAt": "…", "completedAt": "…",
+      "items": [{ "orderItemId": "…", "amountCents": 12000, "reversedAt": null }] }
+  ],
+  "isStub": true
+}
+```
+
+The figures are separate because they are different things for the seller to do
+about them — [ADR 0030](adr/0030-payout-eligibility-and-hold.md):
+
+| Figure | Means | What the seller does |
+| --- | --- | --- |
+| `payableCents` | delivered, past the hold, unrefunded, unclaimed | request a payout |
+| `heldCents` | delivered, still inside the `holdDays` return window | wait |
+| `withheldCents` | owed, but the payout account cannot receive it | finish onboarding |
+| `inFlightCents` | sold and paid for, but not yet delivered | ship it, and wait for the buyer to confirm |
+| `notEarnedCents` | refunded to the buyer, or a line the seller could not send | nothing — shown so the figures add up |
+| `debtCents` | refunded after being paid out | nothing — netted off next payout |
+
+`payable` is the exact line list behind `payableCents`, so "why is this $84?"
+has an answer on screen rather than a total to trust.
+
+**Money inside a `PENDING` payout is in none of those figures.** It has left
+`payableCents` — its lines are claimed — and has not reached `paidCents`, which
+counts settled payouts only. It appears in `history` with `status: "PENDING"`.
+Both the seller page and the admin log surface it from there rather than adding
+a fifth figure that is almost always zero.
+
+### `POST /seller/payouts/account`
+
+Starts Connect onboarding. Reuses an existing `connectAccountId` rather than
+creating a second one — Stripe has no delete worth relying on, and a seller who
+refreshes mid-onboarding must not end up with two accounts.
+
+`201` → `{ "url": "…", "external": true, "expiresAt": "…" }`
+
+`external: false` means the stub, which has no hosted page to redirect to.
+
+Rate limited to **6 per hour per seller**: each call can create a real account.
+
+### `POST /seller/payouts/account/refresh`
+
+Re-reads the account from the provider and updates `payoutsReady`.
+
+`200` → `{ "payoutsReady": true, "detailsSubmitted": true, "pending": [] }`
+
+The `account.updated` webhook is the primary path. This exists so a seller
+returning from onboarding does not wait on a webhook to see the padlock open,
+and so a missed webhook is recoverable without a database console.
+
+| Failure | Code |
+| --- | --- |
+| No account connected yet | `NO_ACCOUNT` (409) |
+
+### `POST /seller/payouts/account/stub-complete`
+
+Stands in for Stripe's hosted onboarding. **`404` under `stripe_connect`** — an
+endpoint that can mark an account ready to receive money must not exist on a
+real deployment, whatever it is guarded by. The identity stub takes the same
+position.
+
+### `POST /seller/payouts/run`
+
+Claims the payable lines and transfers them. **The claim is committed before the
+provider is called**, and `payout_items.orderItemId` is unique, so a second
+concurrent run collides on the constraint instead of double-paying — the same
+claim-then-act shape as `POST /orders/:id/pay`.
+
+`201` → `{ "paid": true, "payoutId": "…", "amountCents": 5000 }`
+
+`200` → `{ "paid": false, "code": "NOTHING_PAYABLE", … }` — the ordinary answer,
+not an error.
+
+| Failure | Code |
+| --- | --- |
+| No payout account connected | `NO_ACCOUNT` (409) |
+| Identity not approved | `NOT_VERIFIED` (409) |
+| Account not finished at the provider | `NOT_READY` (409) |
+| Another run claimed the same lines | `ALREADY_RUNNING` (409) |
+| Provider refused the transfer | `PROVIDER_REFUSED` (502) |
+| Provider unreachable — payout stays claimed | `RETRY_LATER` (503) |
+
+`RETRY_LATER` leaves a `PENDING` payout with its lines still claimed. Nothing
+schedules the retry; `sendPendingPayouts()` finishes it and has to be invoked.
+
+Rate limited to **10 per hour per seller**. The limit is the cheap guard; the
+claim is what actually makes a double-click safe.
+
+### `GET /seller/payouts/:id`
+
+One past payout with the items it covered. Scoped to the requesting seller —
+another seller's payout id is a `404`, not a `403`.
+
+---
+
 ## Addresses — `/addresses` 🔒
 
 Where orders get delivered. Checkout requires one.

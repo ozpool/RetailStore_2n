@@ -17,6 +17,7 @@ import { assertMailConfigured } from "./lib/mailer";
 import { assertNotifyConfigured, notifyTransportKind } from "./lib/notifyTransport";
 import { assertPushConfigured } from "./lib/push";
 import { assertSmsConfigured } from "./lib/smsProvider";
+import { assertPayoutsConfigured } from "./lib/payoutProvider";
 import { lagReport } from "./lib/consumerLag";
 import { assertRateLimitStore } from "./lib/rateLimit";
 import { relayEnabledInProcess, startRelay } from "./lib/relay";
@@ -29,6 +30,7 @@ import { reportsRouter } from "./routes/reports";
 import { reservationsRouter } from "./routes/reservations";
 import { reviewsRouter } from "./routes/reviews";
 import { salesRouter } from "./routes/sales";
+import { sellerPayoutsRouter } from "./routes/sellerPayouts";
 import { sellerVerificationRouter } from "./routes/sellerVerification";
 import { webhooksRouter } from "./routes/webhooks";
 import { wishlistRouter } from "./routes/wishlist";
@@ -119,6 +121,7 @@ app.use("/admin", adminRouter);
 // Verification and sales are mounted before the listing router so their paths
 // aren't shadowed by its own — `/seller/listings/:id` would otherwise swallow
 // anything it pattern-matches.
+app.use("/seller", sellerPayoutsRouter);
 app.use("/seller", sellerVerificationRouter);
 app.use("/seller", salesRouter);
 app.use("/seller", sellerRouter);
@@ -133,12 +136,14 @@ let kycSummary: string;
 let mailSummary: string;
 let notifySummary: string;
 let smsSummary: string;
+let payoutSummary: string;
 try {
   paymentSummary = assertProviderConfigured();
   kycSummary = assertKycConfigured();
   mailSummary = assertMailConfigured();
   notifySummary = assertNotifyConfigured();
   smsSummary = assertSmsConfigured();
+  payoutSummary = assertPayoutsConfigured();
 } catch (err) {
   console.error(`\nConfiguration error:\n  ${(err as Error).message}\n`);
   process.exit(1);
@@ -151,6 +156,7 @@ app.listen(PORT, () => {
   console.log(`Email:    ${mailSummary}`);
   console.log(`Notify:   ${notifySummary}`);
   console.log(`SMS:      ${smsSummary}`);
+  console.log(`Payouts:  ${payoutSummary}`);
   // Not fatal, same policy as Redis and object storage: an unconfigured push
   // channel is a missing feature, not a broken server. Printed loudly so
   // nobody has to guess why nothing arrives.

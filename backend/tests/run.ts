@@ -30,6 +30,8 @@ const SUITES: Suite[] = [
   { name: "push-delivery", file: "api/push-delivery.ts", kind: "api" },
   { name: "sms-delivery", file: "api/sms-delivery.ts", kind: "api" },
   { name: "operations", file: "api/operations.ts", kind: "api" },
+  { name: "payouts", file: "api/payouts.ts", kind: "api" },
+  { name: "payout-routes", file: "api/payout-routes.ts", kind: "api" },
   { name: "wishlist", file: "api/wishlist.ts", kind: "api" },
   { name: "reviews", file: "api/reviews.ts", kind: "api" },
   { name: "checkout-bff", file: "api/checkout-bff.ts", kind: "api" },

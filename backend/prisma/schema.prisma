@@ -155,6 +155,30 @@ enum RefundTrigger {
   SELLER_UNFULFILLABLE
   /// A moderator issued it from the admin panel.
   ADMIN
+  /// A return the buyer asked for and the seller or a moderator approved.
+  /// The request itself lives in ReturnRequest; by the time a Refund exists
+  /// the decision has already been made. See ADR 0031.
+  BUYER_RETURN
+}
+
+/// Where a return request has got to.
+///
+/// OPEN is the only state the seller can answer from, and REFUSED the only one
+/// the buyer can escalate from — every transition is a conditional UPDATE on
+/// the current value, so two concurrent answers cannot both win.
+enum ReturnStatus {
+  /// Asked. The seller has not answered.
+  OPEN
+  /// Answered yes. A Refund exists and refundId points at it.
+  APPROVED
+  /// Answered no by the seller. The buyer may escalate.
+  REFUSED
+  /// The buyer asked a moderator to look at a refusal.
+  ESCALATED
+  /// A moderator agreed with the seller. Terminal.
+  REJECTED
+  /// The buyer changed their mind about asking. Terminal.
+  WITHDRAWN
 }
 
 /// Whether an item has actually been sent.
@@ -277,6 +301,7 @@ model User {
   pushSubscriptions PushSubscription[]
   reportsMade       Report[]                 @relation("ReportsMade")
   moderationActions ModerationAction[]       @relation("ModeratorActions")
+  returnsRequested  ReturnRequest[]          @relation("ReturnBuyer")
 
   @@index([role])
   @@map("users")
@@ -1141,6 +1166,7 @@ model Order {
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
   refunds   Refund[]
+  returns   ReturnRequest[]
 
   @@index([buyerId])
   @@index([status])
@@ -1251,4 +1277,70 @@ model OrderItem {
   /// The seller sales view: their lines, newest first.
   @@index([sellerId, fulfilment])
   @@map("order_items")
+}
+
+/// A buyer asking for their money back on one line.
+///
+/// A REQUEST, NOT A REFUND, and a separate table for that reason: a refund is
+/// money moving, and this is a question that may be answered no. Putting a
+/// status on Refund instead would make a refused return indistinguishable from
+/// a FAILED refund in the one table the finance view reads, and would force the
+/// over-refund guard — a conditional UPDATE on Order.refundedCents — to start
+/// reasoning about refunds that were only ever asked for.
+///
+/// See docs/adr/0031-buyer-initiated-returns.md
+model ReturnRequest {
+  id String @id @default(uuid())
+
+  /// UNIQUE, and this single index is what makes the flow safe under a double
+  /// tap: the insert IS the claim, exactly as with PayoutItem.orderItemId.
+  /// The second concurrent request collides here rather than opening a rival
+  /// request against the same line.
+  ///
+  /// Not a relation, for the same reason PayoutItem.orderItemId is not: a
+  /// return has to stay readable after a listing is deleted, and it is also
+  /// what lets the unique constraint stand alone.
+  orderItemId String @unique
+
+  /// Denormalised so the buyer's own returns can be listed without joining
+  /// through order items, and so the request survives the line being reshaped.
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Who asked. Always the buyer on the order.
+  buyerId String
+  buyer   User   @relation("ReturnBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  status ReturnStatus @default(OPEN)
+
+  /// The buyer's own words, shown to the seller and any moderator verbatim.
+  /// Required for the same reason a refund's reason is: a decision with no
+  /// stated cause is unanswerable.
+  reason String
+
+  /// Whether the buyer says the item was misdescribed rather than simply
+  /// unwanted. Recorded because the help page draws that distinction and it is
+  /// what would decide who pays return postage — nothing acts on it yet, which
+  /// needs the carrier integration ADR 0031 declined.
+  notAsDescribed Boolean @default(false)
+
+  /// The answer, in the answerer's words. Required to refuse or reject.
+  decisionNote String?
+  /// The seller's user id, or the moderator's. Null while OPEN.
+  decidedById  String?
+  decidedAt    DateTime?
+
+  /// The refund this produced. Set only on APPROVED, and unique so one request
+  /// can never be credited twice.
+  refundId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The buyer's own list, newest first.
+  @@index([buyerId, createdAt])
+  /// The seller and admin queues: everything awaiting an answer.
+  @@index([status, createdAt])
+  @@index([orderId])
+  @@map("return_requests")
 }

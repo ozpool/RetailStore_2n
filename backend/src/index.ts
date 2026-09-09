@@ -18,6 +18,7 @@ import { assertNotifyConfigured, notifyTransportKind } from "./lib/notifyTranspo
 import { assertPushConfigured } from "./lib/push";
 import { assertSmsConfigured } from "./lib/smsProvider";
 import { assertPayoutsConfigured } from "./lib/payoutProvider";
+import { returnWindowSummary } from "./lib/returns";
 import { lagReport } from "./lib/consumerLag";
 import { assertRateLimitStore } from "./lib/rateLimit";
 import { relayEnabledInProcess, startRelay } from "./lib/relay";
@@ -157,6 +158,15 @@ app.listen(PORT, () => {
   console.log(`Notify:   ${notifySummary}`);
   console.log(`SMS:      ${smsSummary}`);
   console.log(`Payouts:  ${payoutSummary}`);
+  /**
+   * Said at boot because the relationship between these two numbers is easy to
+   * break and expensive when broken: a return window longer than the payout
+   * hold means every late return lands on money already transferred, turning
+   * the reversal-and-debt path from the exception into the norm. Not fatal —
+   * it is a legitimate, buyer-friendly choice — but nobody should discover it
+   * from a debt row. See ADR 0031.
+   */
+  console.log(`Returns:  ${returnWindowSummary()}`);
   // Not fatal, same policy as Redis and object storage: an unconfigured push
   // channel is a missing feature, not a broken server. Printed loudly so
   // nobody has to guess why nothing arrives.

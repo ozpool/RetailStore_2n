@@ -1,0 +1,66 @@
+# The one scheduled job in the system.
+#
+# WHY THIS ONE AND NOT THE OTHER FIVE. The API already runs five recovery
+# sweepers on a timer, on every replica, and they stay there: each claims its
+# work with a conditional UPDATE so replicas divide it, and a CronJob would
+# serialise work that currently parallelises. This one is different because it
+# MOVES MONEY TO A THIRD PARTY. A retry loop inside the process serving checkout
+# means a Stripe outage and a traffic spike share a thread pool, and "why did
+# this seller get paid at 03:14" has no answer outside application logs. A Job
+# has an exit code, a start time and a record.
+#
+# See docs/adr/0032-kubernetes-manifests.md and docs/adr/0029-payouts-separate-transfers-not-destination-charges.md
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: payouts-pending
+spec:
+  # Every 15 minutes. The window it closes is "the provider timed out and the
+  # claim is still PENDING", which is rare and not urgent — a seller waiting
+  # fifteen minutes for a retry has already waited seven days for the hold.
+  schedule: "*/15 * * * *"
+
+  # Forbid, not Allow.
+  #
+  # Two at once is safe, though not because of the status check at the top of
+  # `sendClaimedPayout` — that is a read, and both workers pass it. Safety comes
+  # from the idempotency key handing both the same transfer, and from `status`
+  # in the settling UPDATE's WHERE so only one records it. Verified on this
+  # cluster: two concurrent Jobs, one transfer, `sent=1 raced=1`.
+  #
+  # Forbidden anyway. Safe is not a reason to do it, and a run slow enough to
+  # overlap the next is a run somebody should look at rather than one to double.
+  concurrencyPolicy: Forbid
+
+  # If the controller was down, do not fire a backlog at Stripe on recovery.
+  startingDeadlineSeconds: 300
+
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          containers:
+            - name: payouts
+              # The runtime image, not the builder: this is application code,
+              # and it needs no Prisma CLI.
+              image: retailstore-2n-api
+              command: ["node", "dist/jobs.js", "payouts:pending"]
+              envFrom:
+                - configMapRef:
+                    name: retailstore-2n-config
+                - secretRef:
+                    name: retailstore-2n-secrets
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 192Mi
+                limits:
+                  memory: 384Mi

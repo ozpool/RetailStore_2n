@@ -22,6 +22,8 @@ resources:
   - minio.yaml
   - api.yaml
   - web.yaml
+  - migrate-job.yaml
+  - payout-cronjob.yaml
   - ingress.yaml
 
 # Every workload gets these, so a `kubectl get all -l app.kubernetes.io/part-of=retailstore-2n`

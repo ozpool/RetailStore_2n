@@ -1,0 +1,450 @@
+name: CI
+
+# Pull requests as well as pushes, because a PR from a fork is the case that
+# matters: it must pass without any of this repository's secrets. Everything
+# below runs against the stub payment and identity providers for exactly that
+# reason — see the note on the `test` job.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch cancels the first. CI here takes over ten
+# minutes, and there is no value in finishing a run whose commit is already
+# superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Fast feedback. No database, no servers, no browsers.
+  #
+  # Split from `test` deliberately: this finishes in a couple of minutes and
+  # catches most mistakes, so a typo does not wait fifteen minutes behind a
+  # Playwright run to tell you about itself.
+  # ------------------------------------------------------------------
+  check:
+    name: Typecheck, lint, build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      # The Prisma client is generated code that is not committed, so nothing
+      # below this line would typecheck without it.
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Validate the schema
+        working-directory: backend
+        run: npx prisma validate
+
+      # BOTH programs, and the second one is the point.
+      #
+      # tsconfig.json exists to emit `dist`, so it sets `rootDir: "src"` and
+      # includes only `src`. This step used to be a bare `tsc --noEmit` against
+      # it, which meant `tests/`, `scripts/` and `prisma/` were never
+      # typechecked by CI at all — all 33 suites and every demo script. A type
+      # error in one of them passed CI and failed at runtime.
+      #
+      # tsconfig.tests.json covers them, as ESM with the DOM lib, because they
+      # are run by tsx and the browser suites pass callbacks to page.evaluate.
+      # Verified by planting a type error in a suite and watching this fail.
+      - name: Typecheck backend
+        working-directory: backend
+        run: npm run typecheck
+
+      # --max-warnings pins the deferred count, same arrangement as the
+      # frontend below.
+      #
+      # 186 warnings, and 124 of them are one rule: no-misused-promises on
+      # `router.get("/x", async …)`. Express 4 does not await a handler, so a
+      # rejection would escape — except every handler wraps its body in
+      # try/catch and answers with fail(). The real fix is one asyncHandler
+      # wrapper at ~124 call sites, which is a refactor of its own.
+      #
+      # This script did not run at all until now: package.json declared it with
+      # no eslint config beside it, so `npm run lint` exited with a migration
+      # error and no workflow called it. The rules that are ERRORS are the ones
+      # that catch money bugs — no-floating-promises above all.
+      - name: Lint backend
+        working-directory: backend
+        run: npm run lint
+
+      # Next generates global types — LayoutProps, PageProps, the route map —
+      # into .next/types, and tsconfig includes that directory. On a developer's
+      # machine it is always there from a previous dev or build run, so a bare
+      # `tsc --noEmit` appears to work. On a fresh checkout it does not exist and
+      # the typecheck fails with "Cannot find name 'LayoutProps'", which is what
+      # happened on the first CI run.
+      #
+      # typegen produces exactly those types without paying for a full build.
+      - name: Generate Next route types
+        working-directory: frontend
+        run: npx next typegen
+
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      # --max-warnings pins the deferred count.
+      #
+      # eslint.config.mjs downgrades react-hooks/set-state-in-effect to a
+      # warning because all 36 instances are the same data-loading pattern and
+      # fixing them is a refactor of its own. A downgrade with no ceiling is a
+      # licence for the number to creep, so the ceiling is the number: a new
+      # instance fails CI, and the fix is the refactor rather than another
+      # exception.
+      #
+      # Raise this only alongside a written reason. Lower it whenever the
+      # refactor removes some.
+      #
+      # 36 -> 37 (delivery log). The admin delivery log added one instance: the
+      # same load-on-mount effect every other page in this list has. Its second
+      # one — resetting to page 1 when a filter changes — was NOT accepted; that
+      # page resets in the change handler instead, which is one render rather
+      # than two and is why the ceiling moved by one rather than two.
+      #
+      # 37 -> 39 (payouts). Two pages, one instance each: the seller's payout
+      # page and the admin payout log, both the same load-on-mount effect. Both
+      # reset paging and filters in their change handlers, so neither
+      # contributed a second instance. Two new pages, two warnings — the
+      # ceiling tracks the pattern, and the pattern did not get worse.
+      #
+      # 39 -> 40 (buyer returns). One instance: OrderLines fetches the buyer's
+      # returns once the order is settled, so a line that already has a request
+      # shows its state instead of a button. Fetched there rather than passed in
+      # so neither the payment page nor the receipt has to know returns exist —
+      # which would have added two instances instead of one.
+      #
+      # 40 -> 42 (the return screens). Two more: the seller's returns section
+      # and the admin returns page, both the same load-on-mount effect. Both
+      # reset paging and filters in their change handlers, so neither added a
+      # second instance.
+      - name: Lint frontend
+        working-directory: frontend
+        run: npx eslint src --max-warnings 42
+
+      # Catches what tsc cannot: a bad import in a route handler, a client
+      # component using a server-only API, a page that fails to prerender.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+        env:
+          BACKEND_URL: http://localhost:4000
+
+  # ------------------------------------------------------------------
+  # The real suite. Drives the actual stack: Postgres, the Express API, and
+  # a production build of the Next frontend.
+  #
+  # NO SECRETS, ON PURPOSE
+  # PAYMENT_PROVIDER and KYC_PROVIDER are stubs, and STRIPE_WEBHOOK_SECRET is
+  # unset. The suites that cover Stripe-specific behaviour detect this and skip
+  # those sections rather than failing, so a pull request from a fork — which
+  # cannot see repository secrets at all — still gets a meaningful green run.
+  # The Stripe paths are exercised locally against test mode.
+  # ------------------------------------------------------------------
+  test:
+    name: End-to-end suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # Shared rate-limit counters. Without it the limiter falls back to
+      # per-process counters and the suite skips the sections that matter — the
+      # TTL, the atomic increment, and the two failure policies.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      # NOTE: MinIO is NOT here, and cannot be. See the "Start MinIO" step.
+      # A service container takes no `command`, and minio/minio needs
+      # `server /data` — without it the entrypoint prints help and exits.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: retailstore_2n
+          POSTGRES_PASSWORD: retailstore_2n
+          POSTGRES_DB: retailstore_2n
+        ports:
+          - 5432:5432
+        # Without this the first migration races the container's startup and
+        # fails on a connection refused that looks like a schema problem.
+        options: >-
+          --health-cmd "pg_isready -U retailstore_2n"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://retailstore_2n:retailstore_2n@localhost:5432/retailstore_2n
+      # Not a secret: this database exists for eight minutes and holds seed data.
+      JWT_SECRET: ci-only-not-a-real-secret-0000000000
+      FRONTEND_ORIGIN: http://localhost:3000
+      BACKEND_URL: http://localhost:4000
+      PAYMENT_PROVIDER: stub
+      KYC_PROVIDER: stub
+      # Stub defaults on its own, but stated explicitly: this is the variable
+      # that decides whether the suite can move money, and a reader should not
+      # have to check a default to know CI cannot.
+      PAYOUT_PROVIDER: stub
+      # A shared HMAC key, not a credential.
+      #
+      # /webhooks/stripe refuses to trust anything without this — rightly, since
+      # otherwise it is an unauthenticated "mark my order paid" endpoint. But the
+      # value is only used to sign and verify: the suites sign their own payloads
+      # with it and the server checks them, so a fixed string exercises the real
+      # verification path with no Stripe account involved.
+      #
+      # Without it those suites skipped their webhook sections and then failed on
+      # the assertions that expect the endpoint to work at all — 16 of the refund
+      # suite's assertions never ran.
+      STRIPE_WEBHOOK_SECRET: whsec_ci_shared_hmac_key_not_a_secret
+      MAIL_TRANSPORT: console
+      # Set for BOTH the server and the test process, so the limiter under test
+      # is the one the assertions are about.
+      REDIS_URL: redis://localhost:6379
+
+      # Uploads go to object storage, as they do in Compose and will in
+      # Kubernetes. Not a credential: this MinIO exists for eleven minutes.
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: retailstore-2n-uploads
+      S3_ACCESS_KEY: retailstore-2n
+      S3_SECRET_KEY: retailstore-2n-ci-not-a-secret
+      # The address the BROWSER uses, which on a runner is the same host. In
+      # Compose these two differ — `minio:9000` for the server, `localhost:9000`
+      # for the browser — and conflating them is the bug ADR 0022 is about.
+      S3_PUBLIC_BASE: http://localhost:9000/retailstore-2n-uploads
+      # PORT is deliberately NOT set here. A job-level PORT is inherited by
+      # every step, so `next start` picked up 4000 and bound it before the API
+      # could — the API died with EADDRINUSE and the health check hit the
+      # frontend, which answered 404. Each server is given its port explicitly
+      # at the point it starts.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      # ------------------------------------------------------------------
+      # Object storage, as a step rather than a service.
+      #
+      # `minio/minio` needs `server /data` and a GitHub service container has
+      # nowhere to put a command — the entrypoint would print help and exit. So
+      # it runs here, where the argument fits, and the bucket setup happens in
+      # the same place rather than in a second step that could drift from it.
+      #
+      # This covers the PRODUCTION configuration: Compose defaults
+      # STORAGE_DRIVER to s3, and until now CI ran the whole suite on local
+      # disk. The storage suite skipped 12 of its 20 assertions and nothing
+      # exercised the path the deployment uses. See ADR 0022.
+      # ------------------------------------------------------------------
+      # quay.io, and pinned. `minio/minio:latest` on Docker Hub stopped being
+      # anonymously pullable — MinIO moved distribution to quay.io — and this
+      # step failed with `insufficient_scope: authorization failed` on every run
+      # until it was changed. Compose and k8s/base/minio.yaml carry the same
+      # pins; all three have to move together.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=retailstore-2n \
+            -e MINIO_ROOT_PASSWORD=retailstore-2n-ci-not-a-secret \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+
+          # Poll rather than sleep: MinIO is usually up in under a second and
+          # a fixed sleep would either be wasted or occasionally too short.
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:9000/minio/health/live > /dev/null; then
+              echo "minio ready after ${i}s"; break
+            fi
+            [ "$i" = "40" ] && { echo "::error::minio did not start"; docker logs minio; exit 1; }
+            sleep 1
+          done
+
+      # Runs the REPO'S OWN bootstrap script, not a copy of it.
+      #
+      # docker/minio/minio-init.sh already creates both buckets and sets the
+      # GetObject-only policy, and its endpoint is overridable for exactly this.
+      # A second copy of that policy here would drift, and the way it would
+      # drift is by quietly regaining `s3:ListBucket` — which the storage suite
+      # asserts against. See ADR 0022.
+      - name: Create the buckets
+        run: |
+          docker run --rm --network host \
+            -e MINIO_ENDPOINT=http://localhost:9000 \
+            -e S3_ACCESS_KEY=retailstore-2n \
+            -e S3_SECRET_KEY=retailstore-2n-ci-not-a-secret \
+            -e S3_BUCKET=retailstore-2n-uploads \
+            -v "$PWD/docker/minio/minio-init.sh:/init.sh:ro" \
+            --entrypoint sh quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z /init.sh
+
+      # The generated client is not committed — .gitignore excludes
+      # src/generated — so a fresh checkout has nothing to import. Every step
+      # below needs it: the seed script, the TypeScript build, and the server.
+      #
+      # This was missing, and `prisma db seed` failed with "Cannot find module
+      # '../src/generated/prisma/client'" on the very first CI run.
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Migrate
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      # Every write is an upsert keyed on a unique column, so this is safe to
+      # re-run. The suites need a catalogue to buy from, including a few
+      # multi-quantity listings for the "buying one of several" case.
+      - name: Seed
+        working-directory: backend
+        run: npx prisma db seed
+
+      # The BROWSE suite is about scale, and the base seed does not have any.
+      #
+      # tests/browser/catalog.ts asserts things that are only true of a large
+      # catalogue: at least 100 distinct photos, no single photo over-used, page
+      # two being full, a deep page still rendering. With the base seed's ~27
+      # listings those are not weaker assertions, they are meaningless ones —
+      # page two holds three items and the suite failed demanding six.
+      #
+      # Weakening them to pass on 27 listings would delete the point of the
+      # suite, so CI loads the same catalogue development uses. No network is
+      # involved: the photo URLs are strings, and the work is 900 inserts.
+      - name: Seed at scale
+        working-directory: backend
+        run: npm run seed:scale
+
+      # A PRODUCTION build, not `next dev`.
+      #
+      # The runner deliberately uses the same thing tests/README.md recommends
+      # locally: a dev server compiles routes on demand and accumulates state,
+      # which makes browser suites fail on waitFor timeouts that have nothing to
+      # do with the code. The preflight in run.ts warns about exactly this.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # Compiled, not run through tsx watch.
+      #
+      # The typecheck job already proves the types are sound; this proves the
+      # emitted JavaScript actually starts, which is a different claim and the
+      # one that matters for a container. It is also the only place `npm run
+      # build` is exercised for the backend at all.
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Install Chromium for Playwright
+        working-directory: backend
+        run: npx playwright install --with-deps chromium
+
+      # RELAY_IN_PROCESS=false, and this is not optional.
+      #
+      # On the inline transport the API also ticks the outbox relay.
+      # tests/api/outbox.ts drives `relayOnce()` by hand and registers its spy
+      # consumer in the TEST process, so a relay running here claims the same
+      # rows and hands them to the API's consumers instead — the suite then
+      # reports "one event published — 0", which is true and tells you nothing.
+      #
+      # Nothing else in the suite needs it: the delivery suites call the
+      # consumer functions directly. The suite detects the clash and names this
+      # variable, so a green run does not depend on remembering the reason.
+      - name: Start the API
+        working-directory: backend
+        run: RELAY_IN_PROCESS=false PORT=4000 npm start > "$RUNNER_TEMP/api.log" 2>&1 &
+
+      # `next start` does NOT work with output: standalone — Next says so and
+      # exits. The standalone build is what the container ships, so CI runs it
+      # the same way rather than a second path that is never deployed.
+      #
+      # Static assets and public/ are not traced into standalone; Next expects
+      # them placed alongside it. The Dockerfile does the same three copies.
+      - name: Assemble the standalone server
+        working-directory: frontend
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+
+      - name: Start the frontend
+        working-directory: frontend
+        run: PORT=3000 node .next/standalone/server.js > "$RUNNER_TEMP/web.log" 2>&1 &
+
+      # run.ts has its own preflight, but it exits(2) with a message rather than
+      # waiting. Waiting here turns "the server had not finished booting" into a
+      # non-event instead of a confusing failure on the first suite.
+      - name: Wait for both to answer
+        run: |
+          for i in $(seq 1 60); do
+            api=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/health || true)
+            web=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || true)
+            if [ "$api" = "200" ] && [ "$web" = "200" ]; then
+              echo "both up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::api=$api web=$web after 60s"
+          echo "--- api log ---"; cat "$RUNNER_TEMP/api.log" || true
+          echo "--- web log ---"; cat "$RUNNER_TEMP/web.log" || true
+          exit 1
+
+      - name: Run the suite
+        working-directory: backend
+        run: npm test
+
+      # Only on failure, and only the logs. A browser suite that fails in CI is
+      # otherwise almost impossible to diagnose from the summary alone — the
+      # screenshots each suite writes are the fastest way to see what the page
+      # actually looked like.
+      - name: Upload failure artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs
+          path: |
+            ${{ runner.temp }}/api.log
+            ${{ runner.temp }}/web.log
+            backend/tests/screenshots/
+          retention-days: 7
+          if-no-files-found: ignore

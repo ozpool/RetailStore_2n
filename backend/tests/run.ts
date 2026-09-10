@@ -22,6 +22,18 @@ type Suite = { name: string; file: string; kind: "api" | "browser"; slow?: boole
 const SUITES: Suite[] = [
   // Fast first: an API failure is usually the real cause of a browser failure,
   // and finding it in ten seconds beats finding it in four minutes.
+  // First: no API, no browser, ~1s, and it covers the write path every other
+  // suite's notifications now go through.
+  { name: "outbox", file: "api/outbox.ts", kind: "api" },
+  { name: "retry-ladder", file: "api/retry-ladder.ts", kind: "api" },
+  { name: "email-delivery", file: "api/email-delivery.ts", kind: "api" },
+  { name: "push-delivery", file: "api/push-delivery.ts", kind: "api" },
+  { name: "sms-delivery", file: "api/sms-delivery.ts", kind: "api" },
+  { name: "operations", file: "api/operations.ts", kind: "api" },
+  { name: "payouts", file: "api/payouts.ts", kind: "api" },
+  { name: "payout-routes", file: "api/payout-routes.ts", kind: "api" },
+  { name: "returns", file: "api/returns.ts", kind: "api" },
+  { name: "return-routes", file: "api/return-routes.ts", kind: "api" },
   { name: "wishlist", file: "api/wishlist.ts", kind: "api" },
   { name: "reviews", file: "api/reviews.ts", kind: "api" },
   { name: "checkout-bff", file: "api/checkout-bff.ts", kind: "api" },
@@ -31,9 +43,12 @@ const SUITES: Suite[] = [
   { name: "passwords", file: "api/passwords.ts", kind: "api" },
   { name: "refresh", file: "api/refresh.ts", kind: "api" },
   { name: "ratelimit", file: "api/ratelimit.ts", kind: "api" },
+  { name: "cache", file: "api/cache.ts", kind: "api" },
+  { name: "storage", file: "api/storage.ts", kind: "api" },
   { name: "uploads", file: "api/uploads.ts", kind: "api" },
   { name: "admin", file: "api/admin.ts", kind: "api" },
   { name: "identity", file: "api/identity.ts", kind: "api" },
+  { name: "identity-stale", file: "api/identity-stale-session.ts", kind: "api" },
 ];
 
 function runOne(suite: Suite): Promise<{ code: number; passed: number; failed: number }> {

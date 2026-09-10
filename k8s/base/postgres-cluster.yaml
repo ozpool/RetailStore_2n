@@ -1,0 +1,63 @@
+# Postgres, as a CloudNativePG Cluster rather than a StatefulSet we maintain.
+#
+# ADR 0020 predicted this file. It built physical replication by hand in
+# Compose — `primary-init.sh`, a replication role, `archive_command` piping to
+# an S3 client — and said in its consequences: "CloudNativePG expresses all of
+# the above as `instances: 3` plus a `barmanObjectStore` block, including
+# failover, which Compose cannot do at all". Understanding the mechanism was
+# worth the custom image; continuing to maintain it is not.
+#
+# WHAT THE OPERATOR DOES THAT COMPOSE COULD NOT:
+#   - promotes a replica when the primary dies (Compose: nothing does)
+#   - schedules base backups and expires old ones (Compose: on demand, forever)
+#   - gives -rw and -ro Services that follow the current primary
+#
+# THE APPLICATION USES -rw ONLY. CNPG provides `postgres-ro` and the temptation
+# is obvious; ADR 0020 declined it deliberately, because routing reads to a
+# standby produces read-your-writes bugs — a buyer landing on an order list
+# that has not replayed their order. An operator making replicas easy does not
+# make reading from them correct.
+#
+# Requires the operator to be installed first:
+#   kubectl apply --server-side -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/v1.30.0/releases/cnpg-1.30.0.yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  # Three: one primary, two standbys. Compose has one standby and no promotion.
+  instances: 3
+
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.10
+
+  bootstrap:
+    initdb:
+      database: retailstore_2n
+      owner: retailstore_2n
+      secret:
+        # The same Secret the application reads, so there is one source for the
+        # password rather than two that can disagree.
+        name: postgres-credentials
+
+  storage:
+    size: 2Gi
+
+  postgresql:
+    parameters:
+      # Matched to what the application actually does rather than left at
+      # defaults: Prisma's driver adapter pools per replica, and the suite runs
+      # 35 suites against one database.
+      max_connections: "100"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+  # BACKUPS ARE NOT WRITTEN HERE, and their absence is the point of the comment
+  # rather than an oversight. `barmanObjectStore` needs a bucket and credentials
+  # that differ per environment, so it belongs in the overlay that has them —
+  # and until one does, this cluster has replication and failover but no
+  # backups, which is exactly what hld.md's limitations list should say.

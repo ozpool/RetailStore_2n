@@ -35,7 +35,36 @@ the old one, rather than an edit.
 | [0016](0016-refunds-claim-then-refund.md) | Refunds: claim headroom atomically, then refund; per line, append-only | Accepted |
 | [0017](0017-password-change-and-reset.md) | Password change and reset; no enumeration, sessions revoked, TOTP survives | Accepted |
 | [0018](0018-redis-for-shared-ephemeral-state.md) | Redis for rate-limit counters; shared ephemeral state only, never a source of truth | Accepted |
+| [0019](0019-cache-tiering-rule.md) | A tiering rule for what may be cached; amends 0018, which rejected caching | Accepted |
+| [0020](0020-replication-and-backups.md) | A streaming standby for availability, and point-in-time recovery to object storage | Accepted |
+| [0021](0021-refresh-race-grace-window.md) | Concurrent refresh handled by a grace window in Postgres, not a Redis lock | Accepted |
+| [0022](0022-object-storage-for-uploads.md) | Object storage for uploads; the last thing blocking a second replica | Accepted |
+| [0023](0023-one-dockerfile-many-targets.md) | One Dockerfile with a target per image; the all-in-one was built and removed | Accepted |
+| [0024](0024-outbox-not-dual-writes.md) | Transactional outbox, not dual writes | Accepted |
+| [0025](0025-kafka-topics-and-partitioning.md) | One topic keyed by user, consumer groups as fan-out, retries on delay topics | Accepted |
+| [0026](0026-delivery-idempotency.md) | A delivery ledger, claimed before the provider is called | Accepted |
+| [0027](0027-notification-consent-and-preferences.md) | Consent before delivery: verified numbers, per-type preferences, unsubscribe | Accepted |
+| [0028](0028-sms-provider-twilio-behind-a-seam.md) | Twilio for SMS, behind the same seam as payments and identity | Accepted |
+| [0029](0029-payouts-separate-transfers-not-destination-charges.md) | Pay sellers with separate transfers, not destination charges | Accepted |
+| [0030](0030-payout-eligibility-and-hold.md) | What makes money payable, and the ledger that stops it being paid twice | Accepted |
+| [0031](0031-buyer-initiated-returns.md) | Buyer-initiated returns, as a request the seller answers | Accepted |
+| [0032](0032-kubernetes-manifests.md) | Kubernetes: an operator for Postgres, plain manifests for everything else | Accepted |
 
+> **All thirty-two are implemented.** 0024 and 0025 landed with phase 1 of
+> [plan 0001](../plans/0001-multi-channel-notifications.md), 0026 and 0027 with
+> phases 2-4, and 0028 with phase 4. 0029 and 0030 were Proposed for one day and
+> landed with [plan 0002](../plans/0002-seller-payouts.md), and 0031 with
+> [plan 0003](../plans/0003-buyer-returns.md) the following day — it is the
+> entry point the refund machinery had been missing since 0016. 0032 landed with
+> [plan 0004](../plans/0004-kubernetes.md), and is the one whose claims are
+> verified on kind rather than on a real cluster.
+>
+> **Accepted is not the same as proven against a provider.** The payout path in
+> 0029 and 0030 is exercised end to end under `PAYOUT_PROVIDER=stub` and nothing
+> more: no connected account has been created and no transfer has been issued.
+> Two questions in those records are business decisions still open — who absorbs
+> Connect's fees on a platform taking no cut, and whether seven days is the right
+> hold. Neither blocks the code, and both could change the numbers.
 
 ## Adding one
 

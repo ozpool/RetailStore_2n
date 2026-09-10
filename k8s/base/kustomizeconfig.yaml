@@ -1,0 +1,32 @@
+# Teaching kustomize the shape of a CRD it does not know.
+#
+# THE PROBLEM THIS SOLVES, because it cost a failed deployment to find.
+# `secretGenerator` appends a content hash to a Secret's name so that changing
+# a credential rolls the pods that read it. Kustomize then rewrites every
+# *known* reference to the new name — `envFrom.secretRef.name` in a Deployment
+# is known, so the API picked its Secret up fine.
+#
+# CloudNativePG's `Cluster` is a CRD, so kustomize has no idea that
+# `spec.bootstrap.initdb.secret.name` is a Secret reference. It left it pointing
+# at `postgres-credentials` while the generated Secret was
+# `postgres-credentials-gkhctdghb8`, and the bootstrap pod failed with
+# CreateContainerConfigError — a message that says nothing about names.
+#
+# The alternative is `disableNameSuffixHash: true`, which fixes it by giving up
+# the feature: no hash, no rollout on a credential change. Teaching the
+# transformer the one field is smaller and keeps it.
+nameReference:
+  - kind: Secret
+    version: v1
+    fieldSpecs:
+      - path: spec/bootstrap/initdb/secret/name
+        kind: Cluster
+        group: postgresql.cnpg.io
+      # Where a restored cluster reads its object-store credentials, for when
+      # an overlay adds backups.
+      - path: spec/backup/barmanObjectStore/s3Credentials/accessKeyId/name
+        kind: Cluster
+        group: postgresql.cnpg.io
+      - path: spec/backup/barmanObjectStore/s3Credentials/secretAccessKey/name
+        kind: Cluster
+        group: postgresql.cnpg.io

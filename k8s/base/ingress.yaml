@@ -1,0 +1,25 @@
+# One Ingress, to `web`.
+#
+# There is no rule for the API, and that is not an omission — see api.yaml. The
+# browser talks only to Next.js, so the API needs no public address.
+#
+# STILL OPEN: the Stripe webhook is the one inbound request that is not a
+# browser, and it currently has nowhere to land. Either this grows a path that
+# bypasses the BFF, or Next proxies webhooks too — which means a
+# signature-verified body passing through a second process. Recorded as
+# question 2 in plan 0004 rather than guessed at here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retailstore-2n
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http

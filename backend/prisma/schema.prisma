@@ -155,6 +155,30 @@ enum RefundTrigger {
   SELLER_UNFULFILLABLE
   /// A moderator issued it from the admin panel.
   ADMIN
+  /// A return the buyer asked for and the seller or a moderator approved.
+  /// The request itself lives in ReturnRequest; by the time a Refund exists
+  /// the decision has already been made. See ADR 0031.
+  BUYER_RETURN
+}
+
+/// Where a return request has got to.
+///
+/// OPEN is the only state the seller can answer from, and REFUSED the only one
+/// the buyer can escalate from — every transition is a conditional UPDATE on
+/// the current value, so two concurrent answers cannot both win.
+enum ReturnStatus {
+  /// Asked. The seller has not answered.
+  OPEN
+  /// Answered yes. A Refund exists and refundId points at it.
+  APPROVED
+  /// Answered no by the seller. The buyer may escalate.
+  REFUSED
+  /// The buyer asked a moderator to look at a refusal.
+  ESCALATED
+  /// A moderator agreed with the seller. Terminal.
+  REJECTED
+  /// The buyer changed their mind about asking. Terminal.
+  WITHDRAWN
 }
 
 /// Whether an item has actually been sent.
@@ -239,12 +263,45 @@ model User {
   /// the comparison is exact: two codes from the same period are the same code.
   totpLastUsedAt  DateTime?
 
+  /// SMS CONTACT. Three columns, because "we have a number" and "we are
+  /// allowed to text it" are different facts and conflating them is how an
+  /// unverified number gets messaged.
+  ///
+  /// E.164, always — "+447700900123". Normalised on the way in so a number
+  /// typed four different ways is one row, and so the provider is never handed
+  /// something it has to guess about.
+  ///
+  /// UNIQUE, and this is a judgement call with a real cost. A verified phone
+  /// is an identity signal, and one number verifying unlimited accounts
+  /// destroys it — that is the abuse this prevents. The cost is that a number
+  /// held by a suspended account cannot be reused by its owner elsewhere,
+  /// which is a support ticket rather than a security hole. Postgres allows
+  /// many NULLs in a unique column, so accounts without a number are
+  /// unaffected.
+  ///
+  /// NEVER POPULATED FROM Address.phone. That field is a delivery contact for
+  /// a parcel, unverified, and frequently a third party's number — see
+  /// docs/adr/0027-notification-consent-and-preferences.md
+  phone              String?             @unique
+  /// Null until a code sent to that number came back. Nothing is EVER sent to
+  /// a number whose value here is null; the column is the gate.
+  phoneVerifiedAt    DateTime?
+  /// When they agreed to be texted, recorded separately from verification
+  /// because proving a number works is not the same as agreeing to receive
+  /// messages on it — and it is the consent, not the verification, that has to
+  /// be produced if anyone asks.
+  smsConsentAt       DateTime?
+  phoneVerifications PhoneVerification[]
+
   orders            Order[]
   wishlist          WishlistItem[]
   addresses         Address[]
   notifications     Notification[]
+  notificationPrefs NotificationPreference[]
+  pushSubscriptions PushSubscription[]
   reportsMade       Report[]                 @relation("ReportsMade")
   moderationActions ModerationAction[]       @relation("ModeratorActions")
+  returnsRequested  ReturnRequest[]          @relation("ReturnBuyer")
 
   @@index([role])
   @@map("users")
@@ -285,6 +342,382 @@ model Notification {
   @@index([userId, readAt])
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// A domain event, written in the SAME TRANSACTION as the notification above.
+///
+/// WHY THIS TABLE EXISTS
+/// Delivering a notification by email, push, or SMS means publishing it
+/// somewhere. Publishing from inside notify() would be a dual write: two
+/// systems, no transaction spanning them, and no ordering of the two that
+/// survives a crash in between. Row first, publish second, and the crash loses
+/// the event with nothing recording that a publish was owed. Publish first, row
+/// second, and a rolled-back transaction has already emailed somebody about a
+/// sale that did not happen.
+///
+/// This row removes the gap: it commits with the notification or not at all,
+/// and a relay publishes only what is already durable. Same discipline as
+/// claim-then-charge — one system decides atomically, the external call comes
+/// after. See docs/adr/0024-outbox-not-dual-writes.md
+///
+/// PUBLISHING IS AT-LEAST-ONCE, DELIBERATELY
+/// The relay publishes and then sets publishedAt. A crash between those two
+/// republishes on the next pass. That is the correct trade — a duplicate is
+/// recoverable and a lost notification is not — and it is why consumers
+/// deduplicate on eventId rather than trusting delivery.
+/// See docs/adr/0026-delivery-idempotency.md
+model OutboxEvent {
+  id String @id @default(uuid())
+
+  /// The consumer's dedupe key. Generated once, here, inside the transaction —
+  /// never regenerated. Every republish by the relay and every redelivery by
+  /// the broker carries this same value, which is the only reason deduplication
+  /// downstream can work at all.
+  eventId String @unique
+
+  /// What this event is about. Not a foreign key: an event has to survive the
+  /// thing it describes being deleted, the same reasoning as Report.targetId.
+  aggregateType String
+  aggregateId   String
+
+  type NotificationType
+
+  /// The partition key, denormalised so the relay never joins to find it.
+  /// The relay's query has to stay a single index scan over unpublished rows.
+  userId String
+
+  /// What a channel worker needs in order to render and send: the notification
+  /// id, its title, body, and link. A snapshot for the same reason the
+  /// notification's own text is one — it must not re-derive from rows that may
+  /// since have changed or gone.
+  payload Json
+
+  createdAt DateTime @default(now())
+
+  /// Null means unpublished. This is the relay's entire working set, and the
+  /// hand-added partial index in the migration is what keeps it cheap once the
+  /// published rows outnumber the pending ones by a few orders of magnitude.
+  publishedAt DateTime?
+
+  /// Diagnostics for a row the relay keeps failing to publish. Written on a
+  /// best-effort basis after a failed batch, outside the rolled-back
+  /// transaction — so a broker outage is visible in the table rather than only
+  /// in a log nobody is tailing.
+  attempts  Int     @default(0)
+  lastError String?
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+}
+
+/// How one transfer to one seller went.
+enum PayoutStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+/// One transfer to one seller, covering one or more delivered order items.
+///
+/// THE PAYOUT UNIT IS THE ORDER ITEM, NOT THE ORDER, because a basket can span
+/// sellers (ADR 0014) and each line is shipped and refunded on its own. An
+/// order with four sellers produces four payouts, on four different days.
+///
+/// CLAIMED BEFORE STRIPE IS CALLED, exactly as a charge is (ADR 0013) and a
+/// refund is (ADR 0016). A read-then-transfer version lets two concurrent runs
+/// both read the same balance and both send it, which for a $120 order means
+/// $240 leaving the platform.
+model Payout {
+  id       String        @id @default(uuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  /// The sum of the items below, less any debt netted off at claim time.
+  amountCents Int
+  /// What was withheld from this payout to settle an earlier failed reversal.
+  nettedCents Int    @default(0)
+  currency    String @default("USD")
+
+  status PayoutStatus @default(PENDING)
+
+  /// A REFERENCE to Stripe's transfer, never a copy of its contents — the same
+  /// rule as Order.paymentIntentId and Refund.providerRefundId.
+  provider           String?
+  providerTransferId String? @unique
+  failureReason      String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  items PayoutItem[]
+
+  @@index([sellerId, createdAt])
+  @@index([status])
+  @@map("payouts")
+}
+
+/// Which order items one payout covered, and for how much.
+///
+/// THE IDEMPOTENCY GUARD IS `orderItemId @unique`. An item can appear in at
+/// most one payout, and a second attempt to include an already-paid item
+/// collides at the database rather than relying on the code above it getting
+/// the order of its checks right — the same discipline as the delivery
+/// ledger's @@unique([eventId, channel]) in ADR 0026.
+///
+/// It also answers the question a seller actually asks — "what is this $84
+/// for?" — because these rows name the exact lines.
+model PayoutItem {
+  id       String @id @default(uuid())
+  payoutId String
+  payout   Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+
+  /// Not a foreign key relation on purpose: a payout statement has to stay
+  /// readable after a listing is deleted, and OrderItem.listingId is already
+  /// nullable for that reason.
+  orderItemId String @unique
+
+  /// Snapshotted, for the same reason the shipping address is copied onto an
+  /// order: what the seller was paid must not change when a price does.
+  amountCents Int
+
+  /// Set when a refund arrived after this line had been paid and the transfer
+  /// was reversed. Kept on the item rather than the payout because a refund is
+  /// per line, so only part of a payout may come back.
+  reversedAt         DateTime?
+  providerReversalId String?
+
+  @@index([payoutId])
+  @@map("payout_items")
+}
+
+/// Money a seller owes back, because a refund arrived after they were paid and
+/// the transfer could not be reversed.
+///
+/// The honest floor of a feature nobody wants to build: it is netted off the
+/// seller's next payout and nothing else happens. No invoice, no collections. A
+/// seller who never sells again keeps it, and that is a stated consequence in
+/// ADR 0030 rather than an oversight — recording who owes what is still far
+/// better than a platform silently absorbing it.
+model PayoutDebt {
+  id       String        @id @default(uuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  amountCents Int
+  currency    String @default("USD")
+  reason      String
+
+  /// The line that caused it, for tracing. Not a relation, same reasoning as
+  /// PayoutItem.orderItemId.
+  orderItemId String?
+
+  createdAt DateTime  @default(now())
+  /// Null until a later payout has absorbed it.
+  settledAt DateTime?
+
+  @@index([sellerId, settledAt])
+  @@map("payout_debts")
+}
+
+/// Where a notification can be sent, beyond the app itself.
+enum DeliveryChannel {
+  EMAIL
+  PUSH
+  SMS
+}
+
+/// How one delivery went.
+///
+/// SUPPRESSED IS AN OUTCOME, NOT AN ABSENCE. A message not sent because the
+/// recipient turned that channel off is recorded rather than dropped. Without
+/// the row, "why did I not get an email about my refund?" can only be answered
+/// by reasoning about what the preferences WOULD have evaluated to at a past
+/// moment, from preferences that have since been edited.
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+  /// Not sent yet, and not a failure: quiet hours. The row carries notBefore
+  /// and a sweeper picks it up once that passes. Distinct from SUPPRESSED
+  /// because SUPPRESSED is terminal — collapsing the two would mean the only
+  /// honest thing to tell somebody at 8am is that their notification was
+  /// dropped at 3am.
+  DEFERRED
+}
+
+/// Which channels actually delivered one event, and what the provider said.
+///
+/// KAFKA AND THE OUTBOX BOTH DELIVER AT LEAST ONCE, BY DESIGN.
+/// The relay publishes and then marks publishedAt, so a crash between the two
+/// republishes. A consumer that sends and then dies before committing its
+/// offset reprocesses on restart. A rebalance during a deploy hands a partition
+/// back at the last committed offset. All three are ordinary operational
+/// events, not failures — exactly as Stripe webhook redeliveries are.
+///
+/// The unique constraint below is what stops any of them becoming a second
+/// email, or a second SMS to somebody's phone at 3am. The row is inserted
+/// BEFORE the provider is called, so the insert IS the claim: same discipline
+/// as claiming an order before charging it. Checking first and inserting after
+/// would reintroduce the read-then-write race of ADR 0012.
+///
+/// See docs/adr/0026-delivery-idempotency.md
+model NotificationDelivery {
+  id      String          @id @default(uuid())
+  /// Matches OutboxEvent.eventId. Not a foreign key: a delivery record must
+  /// outlive the outbox row, which is pruned once published.
+  eventId String
+  channel DeliveryChannel
+  status  DeliveryStatus  @default(PENDING)
+
+  /// Who it went to, for the admin panel's "did they get it?" question.
+  userId String
+
+  /// The notification this delivered, kept so a support query can join the two.
+  notificationId String?
+
+  /// A REFERENCE to the provider's message, never its content. Same rule as the
+  /// payment and KYC fields: this table records that something was sent, not
+  /// what it said.
+  providerMessageId String?
+
+  attempts       Int     @default(0)
+  lastError      String?
+  /// Why nothing was sent. Set when status is SUPPRESSED, and also when
+  /// DEFERRED — in that case it names the window that is holding it.
+  suppressReason String?
+
+  /// The earliest this may be sent. Only set when status is DEFERRED.
+  ///
+  /// A timestamp rather than a flag, because the sweeper's whole query is
+  /// "what is due now". A flag would make it "what is deferred, then work out
+  /// which of those are due" — a scan that grows with everything ever
+  /// deferred rather than with what is actually owed.
+  notBefore DateTime?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  /// THE IDEMPOTENCY GUARD. A redelivery collides here and stops.
+  @@unique([eventId, channel])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  /// The sweeper's query, and the only reason it does not scan the table.
+  @@index([status, notBefore])
+  @@map("notification_deliveries")
+}
+
+/// A code sent to a phone, to prove whoever holds the account holds the number.
+///
+/// MIRRORS EmailVerificationToken DELIBERATELY — hashed, single-use, expiring —
+/// with three differences, each forced by the fact that this is six digits and
+/// not 32 random bytes.
+///
+/// SHORTER EXPIRY. An email link needs an inbox to reach. An SMS code appears
+/// on a lock screen, readable by anyone holding the handset, so it lives for
+/// minutes rather than a day.
+///
+/// AN ATTEMPT COUNTER. A 32-byte token cannot be guessed; a six-digit code is
+/// one of a million, and a few thousand tries would find it. The counter caps
+/// the guesses against ONE code, and the rate limiter caps how fast codes can
+/// be requested — both are needed, because either alone leaves a way through.
+///
+/// THE NUMBER LIVES HERE, NOT ON User, UNTIL IT IS PROVEN. Writing the number
+/// to User at request time would mean an unverified number sitting in the field
+/// that governs delivery, one bug away from being texted.
+model PhoneVerification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The E.164 number this code was sent to, held here until it is proven.
+  phone    String
+  /// SHA-256, like every other token in this schema. A code readable from a
+  /// database dump is a code that can be used from one.
+  codeHash String
+
+  /// Wrong guesses against THIS code. Past the cap the row is spent, so
+  /// guessing costs a fresh code and therefore a fresh rate-limit slot.
+  attempts Int @default(0)
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@map("phone_verifications")
+}
+
+/// An explicit opt-in or opt-out, per event type per channel.
+///
+/// ABSENT MEANS "USE THE DEFAULT FOR THIS TYPE" — see lib/channelPolicy.ts.
+/// Storing only the deviations is what keeps a new NotificationType from
+/// needing a backfill across every user before it can be sent at all, and stops
+/// 11 x 3 rows per account existing purely to say "they never opened settings".
+///
+/// PER TYPE AND PER CHANNEL, NOT PER CHANNEL ALONE. A single "email me" switch
+/// is too coarse in a way that matters: somebody who finds review notifications
+/// noisy would turn email off, and that same switch carries REFUND_ISSUED. The
+/// setting that solves a minor annoyance would silently disable the notice
+/// about their money.
+///
+/// See docs/adr/0027-notification-consent-and-preferences.md
+model NotificationPreference {
+  id      String           @id @default(uuid())
+  userId  String
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type    NotificationType
+  channel DeliveryChannel
+  enabled Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, type, channel])
+  @@index([userId])
+  @@map("notification_preferences")
+}
+
+/// A browser that agreed to receive push notifications.
+///
+/// ONE ROW PER BROWSER PROFILE, NOT PER USER. Somebody signed in on a laptop
+/// and a phone has two, and both should ring. A row per user would silently
+/// mean "the last device that subscribed", and the failure — notifications
+/// going to the device you are not holding — is invisible from the server.
+///
+/// WEB PUSH RATHER THAN FCM OR APNs
+/// There is no mobile app: no store listing, no native build, no signing
+/// certificates. Web Push works in the browser that is already open, and the
+/// same subscription covers desktop and Android. iOS supports it for pages
+/// added to the home screen, which is the honest limit of this approach.
+///
+/// NOTHING HERE IS A SECRET OF OURS. `endpoint`, `p256dh` and `auth` are issued
+/// by the browser's own push service and are useless without the VAPID private
+/// key, which lives in the environment and never in this database.
+model PushSubscription {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The push service's URL for this browser. Unique because a browser
+  /// regenerates its subscription on resubscribe, and a stale duplicate would
+  /// deliver the same notification twice to one device.
+  endpoint String @unique
+  /// The browser's public key and auth secret, for payload encryption.
+  p256dh   String
+  auth     String
+
+  /// Only to make a device list legible ("Chrome on Windows"). Never parsed
+  /// for behaviour — user agents lie, and a notification that renders
+  /// differently per browser string is a bug waiting to happen.
+  userAgent String?
+
+  createdAt  DateTime @default(now())
+  /// Touched on every successful send, so a device list can show what is live.
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 /// Someone flagging something.
@@ -466,6 +899,30 @@ model SellerProfile {
   /// OUR gate: set only from a recorded identity decision. See ADR 0007 and
   /// lib/verification.ts, which is the single place allowed to write it.
   payoutsEnabled Boolean @default(false)
+
+  /// STRIPE'S gate, mirrored from the connected account's `payouts_enabled`
+  /// capability by the account.updated webhook.
+  ///
+  /// TWO FLAGS, NOT ONE, AND THEY ANSWER DIFFERENT QUESTIONS.
+  /// payoutsEnabled is "is this person who they say they are", which is a
+  /// moderation decision this platform owns. This one is "will Stripe move
+  /// money to that bank account" — sanctions screening, tax status, bank
+  /// details — which this platform cannot overrule and must not try to.
+  ///
+  /// Collapsing them would mean one of two failures: paying out to an account
+  /// Stripe will reject, or letting a payments provider quietly reinstate a
+  /// seller that moderation had blocked. Both must be true before a transfer
+  /// is attempted. See docs/adr/0030-payout-eligibility-and-hold.md
+  payoutsReady Boolean @default(false)
+
+  /// The connected account. Unique because two sellers sharing one payout
+  /// destination is either a mistake or fraud, and the constraint is the only
+  /// thing that would notice.
+  connectAccountId   String?   @unique
+  connectOnboardedAt DateTime?
+
+  payouts Payout[]
+  debts   PayoutDebt[]
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -709,6 +1166,7 @@ model Order {
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
   refunds   Refund[]
+  returns   ReturnRequest[]
 
   @@index([buyerId])
   @@index([status])
@@ -819,4 +1277,70 @@ model OrderItem {
   /// The seller sales view: their lines, newest first.
   @@index([sellerId, fulfilment])
   @@map("order_items")
+}
+
+/// A buyer asking for their money back on one line.
+///
+/// A REQUEST, NOT A REFUND, and a separate table for that reason: a refund is
+/// money moving, and this is a question that may be answered no. Putting a
+/// status on Refund instead would make a refused return indistinguishable from
+/// a FAILED refund in the one table the finance view reads, and would force the
+/// over-refund guard — a conditional UPDATE on Order.refundedCents — to start
+/// reasoning about refunds that were only ever asked for.
+///
+/// See docs/adr/0031-buyer-initiated-returns.md
+model ReturnRequest {
+  id String @id @default(uuid())
+
+  /// UNIQUE, and this single index is what makes the flow safe under a double
+  /// tap: the insert IS the claim, exactly as with PayoutItem.orderItemId.
+  /// The second concurrent request collides here rather than opening a rival
+  /// request against the same line.
+  ///
+  /// Not a relation, for the same reason PayoutItem.orderItemId is not: a
+  /// return has to stay readable after a listing is deleted, and it is also
+  /// what lets the unique constraint stand alone.
+  orderItemId String @unique
+
+  /// Denormalised so the buyer's own returns can be listed without joining
+  /// through order items, and so the request survives the line being reshaped.
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Who asked. Always the buyer on the order.
+  buyerId String
+  buyer   User   @relation("ReturnBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  status ReturnStatus @default(OPEN)
+
+  /// The buyer's own words, shown to the seller and any moderator verbatim.
+  /// Required for the same reason a refund's reason is: a decision with no
+  /// stated cause is unanswerable.
+  reason String
+
+  /// Whether the buyer says the item was misdescribed rather than simply
+  /// unwanted. Recorded because the help page draws that distinction and it is
+  /// what would decide who pays return postage — nothing acts on it yet, which
+  /// needs the carrier integration ADR 0031 declined.
+  notAsDescribed Boolean @default(false)
+
+  /// The answer, in the answerer's words. Required to refuse or reject.
+  decisionNote String?
+  /// The seller's user id, or the moderator's. Null while OPEN.
+  decidedById  String?
+  decidedAt    DateTime?
+
+  /// The refund this produced. Set only on APPROVED, and unique so one request
+  /// can never be credited twice.
+  refundId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The buyer's own list, newest first.
+  @@index([buyerId, createdAt])
+  /// The seller and admin queues: everything awaiting an answer.
+  @@index([status, createdAt])
+  @@index([orderId])
+  @@map("return_requests")
 }

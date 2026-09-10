@@ -1,0 +1,87 @@
+# Migrations, as a Job. Never at API startup.
+#
+# ADR 0023 kept `migrate deploy` out of the API image's CMD precisely so this
+# could exist: several replicas racing the migration history is a problem worth
+# not having, and a Job is the shape that maps onto. A *running* migration
+# container would be the bug.
+#
+# THE IMAGE IS DIFFERENT FROM THE API'S. This uses the `api-build` target — the
+# only stage carrying the Prisma CLI, the schema and the migration history. The
+# runtime image deliberately prunes all three (ADR 0023), so `npx prisma
+# migrate deploy` cannot run there at all.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  annotations:
+    # Re-applying the base must be able to re-run this. A Job's spec is
+    # immutable, so kustomize gives it a content hash suffix via the overlay's
+    # nameSuffix — without that, a second `apply` fails rather than migrating.
+    retailstore-2n.dev/note: "one-shot; recreate to re-run"
+spec:
+  # Three attempts, but the initContainer below is what actually makes this
+  # reliable — retrying a Job whose database does not exist yet just burns the
+  # budget faster.
+  backoffLimit: 3
+  # Kept briefly after success so `kubectl logs job/migrate` still answers
+  # "which migrations did this apply".
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      # WAIT FOR POSTGRES, because nothing else will.
+      #
+      # Compose expressed this as `depends_on: condition: service_healthy`.
+      # Kubernetes has no equivalent for a Job: this one fired the moment it was
+      # applied, hit `P1001: Can't reach database server at postgres-rw:5432`
+      # three times while CloudNativePG was still bootstrapping, and went
+      # Failed. `kubectl apply -k` succeeding is not the same as the stack
+      # coming up, and this is the difference.
+      #
+      # A TCP connect is the right check rather than a query: CNPG's `-rw`
+      # Service has no endpoints until an instance is primary and ready, so the
+      # connection cannot succeed against a cluster that is not serving.
+      #
+      # node, because it is in this image already — a postgres client or netcat
+      # would mean installing a package to poll a port.
+      initContainers:
+        - name: wait-for-postgres
+          image: retailstore-2n-migrate
+          command:
+            - node
+            - -e
+            - |
+              const net = require("net");
+              const deadline = Date.now() + 240000;
+              const tryOnce = () => new Promise((res) => {
+                const s = net.connect(5432, "postgres-rw")
+                  .on("connect", () => { s.end(); res(true); })
+                  .on("error", () => res(false));
+                s.setTimeout(3000, () => { s.destroy(); res(false); });
+              });
+              (async () => {
+                while (Date.now() < deadline) {
+                  if (await tryOnce()) { console.log("postgres is accepting connections"); process.exit(0); }
+                  console.log("waiting for postgres-rw:5432...");
+                  await new Promise((r) => setTimeout(r, 3000));
+                }
+                console.error("gave up waiting for postgres after 240s");
+                process.exit(1);
+              })();
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+      containers:
+        - name: migrate
+          image: retailstore-2n-migrate
+          command: ["npx", "prisma", "migrate", "deploy"]
+          envFrom:
+            - secretRef:
+                name: retailstore-2n-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi

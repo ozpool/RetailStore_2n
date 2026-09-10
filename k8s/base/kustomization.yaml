@@ -17,6 +17,9 @@ kind: Kustomization
 
 resources:
   - configmap.yaml
+  - postgres-cluster.yaml
+  - redis.yaml
+  - minio.yaml
   - api.yaml
   - web.yaml
   - ingress.yaml

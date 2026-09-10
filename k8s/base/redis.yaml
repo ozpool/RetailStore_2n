@@ -1,0 +1,63 @@
+# Redis: rate-limit counters and the read-through cache.
+#
+# NO PERSISTENCE, DELIBERATELY. ADR 0018 puts only two things here — counters
+# that expire and copies that can be rebuilt — so losing it costs latency and
+# never data. A PVC would imply otherwise, and the recovery path for a lost
+# Redis is "it fills up again".
+#
+# One replica for the same reason: the failure mode is a slower site, not a
+# broken one, and a cache that needs HA is a cache holding something it should
+# not.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: two Redises briefly sharing a Service means
+    # half the rate-limit reads hit an empty one, which is precisely the
+    # "limits multiply by the number of instances" failure ADR 0018 exists to
+    # prevent.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

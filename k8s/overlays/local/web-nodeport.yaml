@@ -1,0 +1,19 @@
+# `web` reachable from the host, since kind has no Ingress controller.
+#
+# A second Service rather than changing the base's: the base's ClusterIP is
+# what `api` and the probes use, and turning it into a NodePort in every
+# environment to suit one is the tail wagging the dog.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-nodeport
+spec:
+  type: NodePort
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      # Mapped to host 30000 by kind-cluster.yaml.
+      nodePort: 30000

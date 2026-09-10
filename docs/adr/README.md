@@ -48,7 +48,23 @@ the old one, rather than an edit.
 | [0029](0029-payouts-separate-transfers-not-destination-charges.md) | Pay sellers with separate transfers, not destination charges | Accepted |
 | [0030](0030-payout-eligibility-and-hold.md) | What makes money payable, and the ledger that stops it being paid twice | Accepted |
 | [0031](0031-buyer-initiated-returns.md) | Buyer-initiated returns, as a request the seller answers | Accepted |
+| [0032](0032-kubernetes-manifests.md) | Kubernetes: an operator for Postgres, plain manifests for everything else | Accepted |
 
+> **All thirty-two are implemented.** 0024 and 0025 landed with phase 1 of
+> [plan 0001](../plans/0001-multi-channel-notifications.md), 0026 and 0027 with
+> phases 2-4, and 0028 with phase 4. 0029 and 0030 were Proposed for one day and
+> landed with [plan 0002](../plans/0002-seller-payouts.md), and 0031 with
+> [plan 0003](../plans/0003-buyer-returns.md) the following day — it is the
+> entry point the refund machinery had been missing since 0016. 0032 landed with
+> [plan 0004](../plans/0004-kubernetes.md), and is the one whose claims are
+> verified on kind rather than on a real cluster.
+>
+> **Accepted is not the same as proven against a provider.** The payout path in
+> 0029 and 0030 is exercised end to end under `PAYOUT_PROVIDER=stub` and nothing
+> more: no connected account has been created and no transfer has been issued.
+> Two questions in those records are business decisions still open — who absorbs
+> Connect's fees on a platform taking no cut, and whether seven days is the right
+> hold. Neither blocks the code, and both could change the numbers.
 
 ## Adding one
 

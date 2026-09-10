@@ -1,0 +1,141 @@
+# Object storage for photos.
+#
+# IN-CLUSTER IS A LOCAL CONVENIENCE, NOT AN ARCHITECTURE. In a cloud this is a
+# bucket and this file should be deleted from the overlay that runs there — the
+# only reason to run MinIO is to avoid depending on a bucket. Recorded as
+# question 3 in plan 0004.
+#
+# emptyDir, not a PVC. Uploads in a local cluster are test uploads; making them
+# survive a restart implies a durability this deployment does not offer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+    - name: console
+      port: 9001
+      targetPort: console
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          # quay.io, and PINNED, because `minio/minio:latest` on Docker Hub
+          # stopped being anonymously pullable — MinIO moved distribution to
+          # quay.io. The cached copy kept this working until the kind node
+          # restarted and cleared it, and then the pod sat in ImagePullBackOff
+          # for eighteen hours. Everything else here was already pinned
+          # (postgresql:16.10, redis:7-alpine); this was the one `:latest`.
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            # The same keys the API uses, from the same Secret — two sources
+            # for one credential is how a bucket ends up unreachable by the
+            # only process that writes to it.
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: retailstore-2n-secrets
+                  key: S3_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: retailstore-2n-secrets
+                  key: S3_SECRET_KEY
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# The bucket, as a Job. Compose has `minio-init` for exactly this and for the
+# same reason migrations are a Job: several API replicas racing to set the same
+# bucket policy is a problem worth not having.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          env:
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: retailstore-2n-secrets
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: retailstore-2n-secrets
+                  key: S3_SECRET_KEY
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # MC_HOST_<alias> instead of `mc alias set`: no config file, and
+              # no credentials written into a layer. Same trick as compose.
+              export MC_HOST_local="http://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@minio:9000"
+              until mc ls local >/dev/null 2>&1; do
+                echo "waiting for minio..."; sleep 2
+              done
+              mc mb --ignore-existing local/retailstore-2n-uploads
+              # Public read for photos only. The bucket must not be LISTABLE —
+              # ADR 0022, and `storage` asserts it — so this is download, not
+              # list.
+              mc anonymous set download local/retailstore-2n-uploads
+              echo "bucket ready"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi

@@ -1,0 +1,40 @@
+# Configuration that is not a credential.
+#
+# THE SPLIT IS DELIBERATE AND IT IS NOT ABOUT SENSITIVITY ALONE. Everything here
+# can sit in git and be read in a PR. Everything in the Secret must fail the pod
+# when absent — docker-compose.yml defaults JWT_SECRET, the MinIO keys and the
+# replication password so that `git clone && docker compose up` works in one
+# command, which is right for a demo and wrong for anything else. There are no
+# defaults below the line. See docs/adr/0032-kubernetes-manifests.md
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: retailstore-2n-config
+data:
+  NODE_ENV: production
+
+  # Inline, because the base deploys no broker. The messaging overlay flips
+  # this to kafka and adds the relay and worker alongside it.
+  NOTIFY_TRANSPORT: inline
+
+  # Stubs by default, exactly as .env.example ships them. A real deployment
+  # overrides these in its own overlay together with the Stripe secrets — a
+  # provider set to `stripe` with no key fails at boot rather than at checkout,
+  # which is the behaviour assertProviderConfigured() exists for.
+  PAYMENT_PROVIDER: stub
+  KYC_PROVIDER: stub
+  PAYOUT_PROVIDER: stub
+  SMS_PROVIDER: stub
+  MAIL_TRANSPORT: console
+
+  STORAGE_DRIVER: s3
+  S3_BUCKET: retailstore-2n-uploads
+  # Cluster-internal, for the API writing objects.
+  S3_ENDPOINT: http://minio:9000
+
+  REDIS_URL: redis://redis:6379
+
+  # The address the BROWSER uses for photos, which is not the address above.
+  # Conflating the two is the bug ADR 0022 is about, and it is a different
+  # value in every environment — so the base sets neither S3_PUBLIC_BASE nor
+  # FRONTEND_ORIGIN and each overlay must.

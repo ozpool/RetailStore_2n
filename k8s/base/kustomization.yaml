@@ -1,0 +1,40 @@
+# The base: everything the application needs and nothing an environment needs.
+#
+# NO KAFKA, NO RELAY, NO WORKER. The base runs NOTIFY_TRANSPORT=inline, where
+# the relay hands events straight to the consumer functions inside the API — so
+# a relay Deployment would be a container for a function call, and a worker
+# Deployment would have no broker to consume from. `overlays/messaging` adds all
+# three together, which is the compose `messaging` profile expressed as an
+# overlay. See docs/adr/0032-kubernetes-manifests.md
+#
+# POSTGRES IS A CloudNativePG `Cluster`, not a workload we write, so this base
+# REQUIRES the operator to be installed first. That is a real prerequisite and
+# stated in k8s/README.md rather than hidden: `kubectl apply -k` on a cluster
+# without the CRDs fails on an unknown kind, which is a better failure than a
+# hand-rolled StatefulSet that comes up and cannot fail over.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - api.yaml
+  - web.yaml
+  - ingress.yaml
+
+# Every workload gets these, so a `kubectl get all -l app.kubernetes.io/part-of=retailstore-2n`
+# shows the whole system and nothing else.
+# See the file itself: it teaches the name-reference transformer about CNPG's
+# Cluster, without which a generated Secret's hashed name never reaches it.
+configurations:
+  - kustomizeconfig.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: retailstore-2n
+    includeSelectors: true
+
+images:
+  - name: retailstore-2n-api
+    newTag: latest
+  - name: retailstore-2n-web
+    newTag: latest

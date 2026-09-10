@@ -1,0 +1,15 @@
+# A one-node kind cluster, for verifying the manifests actually run.
+#
+# One node rather than three: nothing in these manifests is about scheduling
+# across nodes, and three kind nodes on a laptop is three kubelets competing
+# for the RAM the application needs.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # The storefront, via the NodePort the local overlay adds. There is no
+      # Ingress controller here, which is why that overlay deletes the Ingress.
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP

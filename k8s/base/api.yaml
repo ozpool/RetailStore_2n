@@ -1,0 +1,97 @@
+# The Express API.
+#
+# NO INGRESS, AND THAT IS THE POINT. A ClusterIP Service that only `web`
+# resolves — the browser talks to Next.js and nothing else, which ADR 0002 has
+# been arranging since the beginning. In Kubernetes that arrangement pays off as
+# an API with no public address at all, and `BACKEND_URL: http://api:4000`
+# carries over from Compose unchanged.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  # Two, so a rolling update does not mean an outage. The five recovery
+  # sweepers run on BOTH and that is safe rather than wasteful: each claims its
+  # work with a conditional UPDATE, so N replicas divide the queue instead of
+  # doing it N times (ADR 0032).
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      securityContext:
+        # The image already runs as `node`; stated here so a cluster policy
+        # that inspects the spec rather than the image agrees.
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: api
+          image: retailstore-2n-api
+          ports:
+            - name: http
+              containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: retailstore-2n-config
+            # No `optional: true`. A missing Secret must stop the rollout.
+            - secretRef:
+                name: retailstore-2n-secrets
+          env:
+            - name: PORT
+              value: "4000"
+            # The relay is only in-process on the inline transport; on kafka the
+            # overlay runs it as its own Deployment. Set explicitly so the
+            # behaviour does not depend on a default nobody can see.
+            - name: RELAY_IN_PROCESS
+              value: "true"
+          # A cold start builds the Prisma client's connection pool and runs
+          # the provider assertions, and on a loaded node that is slower than
+          # the liveness probe's patience. startupProbe gives it room WITHOUT
+          # making the liveness probe permanently lax, which is the mistake of
+          # setting a long initialDelaySeconds instead.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness is the same endpoint, deliberately NOT /health/lag: lag is
+          # a property of the notification pipeline, and an API with a backlog
+          # of emails can still take somebody's money. Removing it from the
+          # Service for that would be an outage caused by a warning.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

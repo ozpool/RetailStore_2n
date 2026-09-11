@@ -754,6 +754,57 @@ another seller's payout id is a `404`, not a `403`.
 
 ---
 
+## Placement — `/seller/placements` 🔒🏪
+
+Asking to appear on the homepage
+([ADR 0034](adr/0034-paid-homepage-placement.md)).
+
+**No money moves through any of this.** `agreedCents` is what both sides settled
+on; there is no seller-to-platform charge in this application and the ADR
+records why that boundary was drawn rather than crossed.
+
+### `GET /seller/placements/slots`
+
+```json
+{
+  "slots": [
+    { "slot": "HERO", "positions": 1, "label": "Homepage hero banner" },
+    { "slot": "PICKED_SHELF", "positions": 4, "label": "Picked for you shelf" }
+  ],
+  "disclosure": "Paid placements are labelled “Promoted” wherever they appear."
+}
+```
+
+`disclosure` is in the API, not only in the UI. A seller agreeing to pay is
+entitled to know the placement will be labelled **before** they agree, and a
+client that forgets to render it should not be the only thing standing between
+them and a surprise.
+
+### `POST /seller/placements`
+
+`{ listingId, slot, position?, offeredCents, startsAt?, endsAt?, note }`.
+Creates the request **and** the thread that will carry its negotiation, in one
+transaction.
+
+| Refusal | Why |
+| --- | --- |
+| `404 NOT_FOUND` | no such listing — **or** somebody else's, answered identically |
+| `409 LISTING_NOT_ACTIVE` | a draft or sold listing would spend a slot on nothing buyable |
+| `400 INVALID_INPUT` (`position`) | the hero has one position; the shelf has four |
+| `409 ALREADY_OPEN` | one open request per listing |
+| `429 RATE_LIMITED` | 10 requests per day |
+
+### `POST /seller/placements/:id/accept`
+
+Accepts a counter-offer, reaching `AGREED`. `409 WRONG_STATE` if there is no
+counter waiting.
+
+### `POST /seller/placements/:id/withdraw`
+
+Terminal, and allowed even after agreeing.
+
+---
+
 ## Addresses — `/addresses` 🔒
 
 Where orders get delivered. Checkout requires one.
@@ -1187,6 +1238,30 @@ another admin — revoke the role from the CLI first. Both are checked *before*
 state.
 
 ---
+
+### Merchandising — `/admin/placements`
+
+Choosing what the homepage shows
+([ADR 0034](adr/0034-paid-homepage-placement.md)). This is the first
+**productive** admin power in the application — every other one removes
+something — and the first where the platform has a commercial interest in the
+outcome, which is why the terms live in a thread the seller can read back and
+the label is not optional.
+
+| Route | What it does |
+| --- | --- |
+| `GET /admin/placements?pending=1` | the queue plus `live`, the slots currently on the homepage. `pending=1` is everything **needing a moderator's hand** — `REQUESTED`, `COUNTERED` *and* `AGREED`, the last because an agreed placement is waiting to be made live |
+| `GET /admin/placements/:id` | one request |
+| `POST /admin/placements/:id/counter` | `{ agreedCents, slot?, position?, startsAt?, endsAt?, note }` — proposes terms and says so in the thread |
+| `POST /admin/placements/:id/accept` | takes the seller's offer unchanged |
+| `POST /admin/placements/:id/decline` | `{ note }` — **required**. A refusal with no reason forces the seller to guess, the same rule as refusing a return |
+| `POST /admin/placements/:id/activate` | `AGREED → LIVE` |
+| `POST /admin/placements/:id/end` | `LIVE → ENDED` |
+
+`activate` answers **`409 SLOT_TAKEN`** when another placement holds that slot.
+That is the partial unique index `placement_live_slot` refusing it, not an
+error: the request stays `AGREED` and the sweeper starts it when the slot frees.
+`409 WRONG_STATE` means somebody else answered first — reload rather than retry.
 
 ## Webhooks — `/webhooks/stripe`
 

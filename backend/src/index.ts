@@ -6,6 +6,7 @@ import { UPLOAD_DIR, assertStorage, storageDriver } from "./lib/storage";
 import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
+import { sellerMessagingRouter } from "./routes/sellerMessaging";
 import { profileRouter } from "./routes/profile";
 import { startDeferredSweeper } from "./lib/deferredDeliveries";
 import { startOutboxRetentionSweeper } from "./lib/outboxRetention";
@@ -126,6 +127,7 @@ app.use("/admin", adminRouter);
 app.use("/seller", sellerPayoutsRouter);
 app.use("/seller", sellerVerificationRouter);
 app.use("/seller", salesRouter);
+app.use("/seller", sellerMessagingRouter);
 app.use("/seller", sellerRouter);
 
 /**

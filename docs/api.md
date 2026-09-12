@@ -754,6 +754,46 @@ another seller's payout id is a `404`, not a `403`.
 
 ---
 
+## Messages — `/seller/messages` 🔒🏪
+
+Conversations with the platform ([ADR 0033](adr/0033-seller-admin-messaging.md)).
+A thread has this seller on one side and the moderator **role** on the other —
+there is no admin user id on it, because moderation is a shift rather than an
+assignment.
+
+Another seller's thread answers **404, not 403**, so an id cannot be used to ask
+whether somebody else's conversation exists.
+
+### `GET /seller/messages`
+
+```json
+{ "threads": [
+  { "id": "…", "kind": "PLACEMENT", "subject": "Homepage placement — …",
+    "lastMessageAt": "…", "closedAt": null, "unread": 1,
+    "placement": { "id": "…", "status": "COUNTERED", "slot": "HERO" } }
+], "unreadThreads": 1 }
+```
+
+### `GET /seller/messages/:id`
+
+The thread with its messages, oldest first. **Reading it clears this side's
+unread counter** — a deliberate side effect on a GET, because the alternative is
+a client that must remember to post a read receipt and a badge that never
+clears when it forgets.
+
+### `POST /seller/messages`
+
+Opens a `SUPPORT` thread. `{ subject, body }`. Capped at **5 per hour** — a new
+thread is a new entry in somebody's queue.
+
+### `POST /seller/messages/:id/reply`
+
+`{ body }`. Capped at **30 per hour**. A closed thread answers
+`409 THREAD_CLOSED` rather than silently reopening: a moderator who closed a
+resolved conversation should not find it back in the queue with no record of why.
+
+---
+
 ## Placement — `/seller/placements` 🔒🏪
 
 Asking to appear on the homepage
@@ -1262,6 +1302,23 @@ the label is not optional.
 That is the partial unique index `placement_live_slot` refusing it, not an
 error: the request stays `AGREED` and the sweeper starts it when the slot frees.
 `409 WRONG_STATE` means somebody else answered first — reload rather than retry.
+
+### Conversations — `/admin/messages`
+
+| Route | What it does |
+| --- | --- |
+| `GET /admin/messages?unanswered=1` | the queue, unanswered first |
+| `GET /admin/messages/:id` | one thread. **Clears the badge for every moderator**, because the admin side is one role with one counter ([ADR 0033](adr/0033-seller-admin-messaging.md)) |
+| `POST /admin/messages/:id/reply` | `{ body }` |
+| `POST /admin/messages/:id/close` | conditional — a second close answers `409` |
+| `POST /admin/messages/:id/reopen` | the same, in reverse |
+
+A message from a seller notifies **every non-suspended moderator**, one event
+each. A reply notifies exactly the seller. Suspended admins are excluded, for
+the reason `ACCOUNT_SUSPENDED` has no push channel: a notification whose link
+leads to a login screen that refuses you is worse than silence.
+
+---
 
 ## Webhooks — `/webhooks/stripe`
 

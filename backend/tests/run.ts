@@ -56,7 +56,9 @@ const SUITES: Suite[] = [
 
   { name: "browser-catalog", file: "browser/catalog.ts", kind: "browser" },
   { name: "browser-checkout", file: "browser/checkout.ts", kind: "browser" },
+  { name: "browser-fulfilment", file: "browser/fulfilment.ts", kind: "browser" },
   { name: "browser-wishlist", file: "browser/wishlist.ts", kind: "browser" },
+  { name: "browser-reviews", file: "browser/reviews.ts", kind: "browser" },
   { name: "browser-identity", file: "browser/identity.ts", kind: "browser" },
   // Waits ~30s for a hold to expire on its own.
   { name: "browser-cart-badge", file: "browser/cart-badge.ts", kind: "browser", slow: true },

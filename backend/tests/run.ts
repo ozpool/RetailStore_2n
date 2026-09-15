@@ -55,7 +55,11 @@ const SUITES: Suite[] = [
   { name: "identity-stale", file: "api/identity-stale-session.ts", kind: "api" },
 
   { name: "browser-catalog", file: "browser/catalog.ts", kind: "browser" },
+  { name: "browser-checkout", file: "browser/checkout.ts", kind: "browser" },
+  { name: "browser-wishlist", file: "browser/wishlist.ts", kind: "browser" },
   { name: "browser-identity", file: "browser/identity.ts", kind: "browser" },
+  // Waits ~30s for a hold to expire on its own.
+  { name: "browser-cart-badge", file: "browser/cart-badge.ts", kind: "browser", slow: true },
 ];
 
 function runOne(suite: Suite): Promise<{ code: number; passed: number; failed: number }> {

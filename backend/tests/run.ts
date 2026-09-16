@@ -53,6 +53,8 @@ const SUITES: Suite[] = [
   { name: "admin", file: "api/admin.ts", kind: "api" },
   { name: "identity", file: "api/identity.ts", kind: "api" },
   { name: "identity-stale", file: "api/identity-stale-session.ts", kind: "api" },
+  // Waits ~60s for the reconciliation sweeper.
+  { name: "payment-safety", file: "payment-safety.ts", kind: "api", slow: true },
 
   { name: "browser-catalog", file: "browser/catalog.ts", kind: "browser" },
   { name: "browser-checkout", file: "browser/checkout.ts", kind: "browser" },

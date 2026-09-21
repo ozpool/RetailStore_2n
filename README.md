@@ -95,6 +95,38 @@ printed to the **backend terminal** — paste it into your browser to activate t
 account. Set `MAIL_TRANSPORT=ethereal` to have it delivered to a throwaway inbox
 instead, or `smtp` with credentials to send for real.
 
+## What it looks like
+
+Four screens, each chosen because it shows a decision rather than a feature.
+Every one is the test suite's own Playwright output, not a mockup.
+
+| | |
+| --- | --- |
+| ![A seller's sales list, each line with its own fulfilment state](docs/screenshots/seller-sales.png) | ![A buyer's order receipt](docs/screenshots/order-receipt.png) |
+
+**Left — fulfilment is per line, not per order.** A basket can span four sellers
+and two sellers cannot share one parcel, so "your order has shipped" is not a
+sentence this system can honestly say ([ADR 0014](docs/adr/0014-one-order-fulfilment-per-line.md)).
+**Right — the receipt is a snapshot.** The address was copied onto the order at
+checkout, so editing your address book afterwards cannot rewrite where a past
+parcel went.
+
+![The admin dashboard: revenue, orders needing attention, and the moderation queue](docs/screenshots/admin-dashboard.png)
+
+**The operational half, which is usually the missing half.** Behind a
+CLI-granted role and a TOTP step-up — there is deliberately no "make me an
+admin" endpoint, because an HTTP route that grants privilege is a route worth
+attacking ([ADR 0015](docs/adr/0015-admin-by-cli-grant-and-step-up.md)). Every
+action a moderator takes writes an append-only audit row, since a removal with
+no recorded reason is unanswerable three months later.
+
+<details>
+<summary>The audit log itself</summary>
+
+![The moderation audit log](docs/screenshots/admin-audit.png)
+
+</details>
+
 ## Testing
 
 ```bash

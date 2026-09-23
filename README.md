@@ -441,6 +441,60 @@ assumed.
 rather than smoothing it over. A promotion is a short automatic outage, not an
 invisible one.
 
+## Documentation
+
+The README stays deliberately short. Everything else lives in [`docs/`](docs/):
+
+| Document | What's in it |
+| --- | --- |
+| [Architecture overview](docs/architecture/README.md) | How the pieces fit, at a glance |
+| [High-level design](docs/architecture/hld.md) | System context, containers, request lifecycle, security model |
+| [Low-level design](docs/architecture/lld.md) | Module responsibilities, key flows, sequence diagrams |
+| [Data model](docs/architecture/data-model.md) | ER diagram and table-by-table reference |
+| [API reference](docs/api.md) | Every endpoint, with request and response shapes |
+| [Decision records](docs/adr/README.md) | 34 ADRs on why things are built the way they are, all accepted |
+| [Kubernetes](k8s/README.md) | The manifests, what is verified on kind, and what is not |
+| [Contributing](CONTRIBUTING.md) | Local setup, conventions, testing expectations |
+| [Security](SECURITY.md) | Reporting vulnerabilities, and the security posture |
+
+If you only read one, read the [decision records](docs/adr/README.md). They
+carry the reasoning that the code cannot: why money is stored as integer minor
+units, why stock is claimed under a row lock, why an order is claimed before it
+is charged, and why admin is granted by CLI with no promotion endpoint.
+
+## Repository layout
+
+```
+RetailStore_2n/
+├── backend/            Express API
+│   ├── prisma/         Schema, migrations, seed
+│   ├── scripts/        admin grant/revoke, and the safety/throughput demos
+│   ├── src/
+│   │   ├── lib/        50 modules — auth, orders, payments, refunds, payouts,
+│   │   │               notifications, moderation, cache, rate limiting,
+│   │   │               mail, SMS, push, storage, images, KYC
+│   │   ├── middleware/ requireAuth, requireSeller, requireAdmin
+│   │   └── routes/     18 routers — auth, catalog, seller, orders,
+│   │                   reservations, payouts, admin, webhooks, and the rest
+│   └── tests/          40 suites: api/, browser/, and shared fixtures
+├── frontend/           Next.js storefront
+│   └── src/
+│       ├── app/        Routes, including BFF handlers under app/api/*
+│       ├── components/ UI, including the admin dashboard
+│       └── lib/        API clients, auth context, catalog helpers
+├── docker/             Postgres replication and backups, MinIO bootstrap
+├── k8s/                Kustomize manifests, a CloudNativePG cluster, one CronJob
+├── docs/               Architecture, ADRs, API reference
+├── Dockerfile          Every image: targets api, web, api-build
+└── docker-compose.yml  postgres, redis, minio, migrate, seed, api, web
+```
+
+The browser only ever talks to the Next.js server. Next.js acts as a
+Backend-for-Frontend: route handlers under `frontend/src/app/api/*` proxy to
+Express server-to-server and relay session cookies both ways, so the browser
+never learns the backend's address. See
+[ADR 0002](docs/adr/0002-bff-proxy.md).
+
 ## What's built
 
 **Buying**

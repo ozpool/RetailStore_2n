@@ -78,6 +78,19 @@ not a restatement of the code.
 Names: tables `snake_case` via `@@map`, TypeScript `camelCase`, enum values
 `SCREAMING_SNAKE_CASE`.
 
+## Documentation
+
+Ship docs with the code, in the same change:
+
+| Change | Also update |
+| --- | --- |
+| Schema | [docs/architecture/data-model.md](docs/architecture/data-model.md) |
+| Endpoint added or changed | [docs/api.md](docs/api.md) |
+| Module boundary or notable flow | [docs/architecture/lld.md](docs/architecture/lld.md) |
+| A decision with more than one defensible answer | a new [ADR](docs/adr/README.md) |
+| Env var | `.env.example` in the relevant app, **and** `k8s/base/configmap.yaml` or the Secret |
+| Anything a deployment needs | `k8s/` — Compose and the manifests will drift, and where they disagree about anything but topology the manifests are wrong |
+
 ## Before you push
 
 ```bash

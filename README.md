@@ -9,6 +9,45 @@ A marketplace for secondhand furniture, clothing, and objects, where condition
 is disclosed rather than hidden. Built as a full-stack TypeScript application:
 a Next.js storefront, an Express API, and PostgreSQL.
 
+> **Status: working end to end.** Browsing, accounts, selling, checkout,
+> payments, refunds, buyer-initiated returns, seller payouts, order fulfilment,
+> identity verification, email, web push, SMS, and an admin dashboard all work —
+> covered by **1,418 assertions across 40 suites** (`npm test`), run against the
+> real stack rather than mocks, 1,273 with a Kafka broker present.
+>
+> It also *deploys*: [Kubernetes manifests](k8s/) with a CloudNativePG cluster,
+> where deleting the Postgres primary promoted a replica and a write then
+> succeeded with **zero API restarts** — measured, on a real cluster made with
+> kind, by [a script in the repo](k8s/failover-demo.sh).
+>
+> **What is not real:** payments, identity and payouts run against provider
+> stubs or Stripe's test mode. No real money has moved, no real document has
+> been checked, and no seller has ever actually been paid. The manifests have
+> never run anywhere but kind. Every gap like this is listed in
+> [What's built](#whats-built) rather than left for you to discover.
+
+---
+
+<!--
+  ONE image here, deliberately, and the rest under "What it looks like" further
+  down beside the claims they support.
+  
+  Screenshots are the only claim in this file that nothing verifies. The
+  assertion counts come from a run, the failover numbers from a script, the ADR
+  statuses get corrected when they drift — an image just quietly starts lying
+  when the UI moves on. So: one, to answer "is this a real product", and the
+  rest kept near the arguments they illustrate rather than in a gallery at the
+  top.
+
+  All of them are the suite's own Playwright output, not mockups.
+  `backend/tests/screenshots/` is gitignored because 46 files that regenerate
+  every run do not belong in git history; these are a deliberate resized copy.
+-->
+
+![The RetailStore_2n storefront: categories, price drops, and condition disclosed rather than hidden](docs/screenshots/storefront.webp)
+
+---
+
 ## Stack
 
 | Layer | Technology |
@@ -94,6 +133,38 @@ Sign up, and with the default `MAIL_TRANSPORT=console` the verification link is
 printed to the **backend terminal** — paste it into your browser to activate the
 account. Set `MAIL_TRANSPORT=ethereal` to have it delivered to a throwaway inbox
 instead, or `smtp` with credentials to send for real.
+
+## What it looks like
+
+Four screens, each chosen because it shows a decision rather than a feature.
+Every one is the test suite's own Playwright output, not a mockup.
+
+| | |
+| --- | --- |
+| ![A seller's sales list, each line with its own fulfilment state](docs/screenshots/seller-sales.png) | ![A buyer's order receipt](docs/screenshots/order-receipt.png) |
+
+**Left — fulfilment is per line, not per order.** A basket can span four sellers
+and two sellers cannot share one parcel, so "your order has shipped" is not a
+sentence this system can honestly say ([ADR 0014](docs/adr/0014-one-order-fulfilment-per-line.md)).
+**Right — the receipt is a snapshot.** The address was copied onto the order at
+checkout, so editing your address book afterwards cannot rewrite where a past
+parcel went.
+
+![The admin dashboard: revenue, orders needing attention, and the moderation queue](docs/screenshots/admin-dashboard.png)
+
+**The operational half, which is usually the missing half.** Behind a
+CLI-granted role and a TOTP step-up — there is deliberately no "make me an
+admin" endpoint, because an HTTP route that grants privilege is a route worth
+attacking ([ADR 0015](docs/adr/0015-admin-by-cli-grant-and-step-up.md)). Every
+action a moderator takes writes an append-only audit row, since a removal with
+no recorded reason is unanswerable three months later.
+
+<details>
+<summary>The audit log itself</summary>
+
+![The moderation audit log](docs/screenshots/admin-audit.png)
+
+</details>
 
 ## Testing
 
@@ -370,3 +441,246 @@ assumed.
 rather than smoothing it over. A promotion is a short automatic outage, not an
 invisible one.
 
+## Documentation
+
+The README stays deliberately short. Everything else lives in [`docs/`](docs/):
+
+| Document | What's in it |
+| --- | --- |
+| [Architecture overview](docs/architecture/README.md) | How the pieces fit, at a glance |
+| [High-level design](docs/architecture/hld.md) | System context, containers, request lifecycle, security model |
+| [Low-level design](docs/architecture/lld.md) | Module responsibilities, key flows, sequence diagrams |
+| [Data model](docs/architecture/data-model.md) | ER diagram and table-by-table reference |
+| [API reference](docs/api.md) | Every endpoint, with request and response shapes |
+| [Decision records](docs/adr/README.md) | 34 ADRs on why things are built the way they are, all accepted |
+| [Kubernetes](k8s/README.md) | The manifests, what is verified on kind, and what is not |
+| [Contributing](CONTRIBUTING.md) | Local setup, conventions, testing expectations |
+| [Security](SECURITY.md) | Reporting vulnerabilities, and the security posture |
+
+If you only read one, read the [decision records](docs/adr/README.md). They
+carry the reasoning that the code cannot: why money is stored as integer minor
+units, why stock is claimed under a row lock, why an order is claimed before it
+is charged, and why admin is granted by CLI with no promotion endpoint.
+
+## Repository layout
+
+```
+RetailStore_2n/
+├── backend/            Express API
+│   ├── prisma/         Schema, migrations, seed
+│   ├── scripts/        admin grant/revoke, and the safety/throughput demos
+│   ├── src/
+│   │   ├── lib/        50 modules — auth, orders, payments, refunds, payouts,
+│   │   │               notifications, moderation, cache, rate limiting,
+│   │   │               mail, SMS, push, storage, images, KYC
+│   │   ├── middleware/ requireAuth, requireSeller, requireAdmin
+│   │   └── routes/     18 routers — auth, catalog, seller, orders,
+│   │                   reservations, payouts, admin, webhooks, and the rest
+│   └── tests/          40 suites: api/, browser/, and shared fixtures
+├── frontend/           Next.js storefront
+│   └── src/
+│       ├── app/        Routes, including BFF handlers under app/api/*
+│       ├── components/ UI, including the admin dashboard
+│       └── lib/        API clients, auth context, catalog helpers
+├── docker/             Postgres replication and backups, MinIO bootstrap
+├── k8s/                Kustomize manifests, a CloudNativePG cluster, one CronJob
+├── docs/               Architecture, ADRs, API reference
+├── Dockerfile          Every image: targets api, web, api-build
+└── docker-compose.yml  postgres, redis, minio, migrate, seed, api, web
+```
+
+The browser only ever talks to the Next.js server. Next.js acts as a
+Backend-for-Frontend: route handlers under `frontend/src/app/api/*` proxy to
+Express server-to-server and relay session cookies both ways, so the browser
+never learns the backend's address. See
+[ADR 0002](docs/adr/0002-bff-proxy.md).
+
+## What's built
+
+**Buying**
+
+- Catalogue browsing — categories, listing detail, search with filters
+  (category, condition, price range), sorting, pagination
+- Stock held under a row lock during checkout, so two buyers can never both
+  claim the same one-of-a-kind object ([ADR 0012](docs/adr/0012-row-locking-for-reservations.md))
+- Payment via Stripe PaymentIntents, claimed before it is charged so two
+  concurrent clicks cannot pay twice ([ADR 0013](docs/adr/0013-payment-provider-seam.md))
+- Orders, addresses, wishlist, reviews with computed ratings
+
+**Selling**
+
+- Seller onboarding, listing CRUD, photo upload with EXIF stripping,
+  draft/publish lifecycle
+- Per-line fulfilment — a basket can span sellers, and two sellers cannot share
+  one parcel ([ADR 0014](docs/adr/0014-one-order-fulfilment-per-line.md))
+- Identity verification through Stripe Identity, gating payouts rather than
+  listing ([ADR 0007](docs/adr/0007-verification-gates-payouts.md))
+
+**Paying sellers out**
+
+- Buyers pay the platform and the platform transfers onward — separate charges
+  and transfers, not destination charges, because the platform takes no cut and
+  a destination charge assumes one
+  ([ADR 0029](docs/adr/0029-payouts-separate-transfers-not-destination-charges.md))
+- A payout **claims its lines before a cent moves**, and `payout_items.orderItemId`
+  is unique, so two concurrent runs collide on the constraint rather than paying
+  the same item twice — the same shape as claim-then-charge
+- Five conditions decide what is owed, and a seven-day hold after delivery keeps
+  the platform from paying out money a dispute is about to claw back
+  ([ADR 0030](docs/adr/0030-payout-eligibility-and-hold.md))
+- A refund that lands after a payout reverses the transfer, and a reversal the
+  provider refuses becomes a debt netted off the seller's next payout rather
+  than an invoice
+- `/seller/payouts` shows the lines behind every figure; `/admin/payouts` is the
+  reconciliation view and is deliberately **read-only**
+
+**Money back**
+
+- **A buyer can ask.** Open the order, say what's wrong, and the seller answers;
+  a refusal has to carry a reason and can be escalated to a moderator, whose
+  decision is final ([ADR 0031](docs/adr/0031-buyer-initiated-returns.md))
+- The return window derives from the payout hold rather than being picked
+  separately, so a return can never land on money already sent to the seller —
+  and the boot banner says so if an operator configures them apart
+- Automatic refunds when a seller marks a line unsendable, and moderator-issued
+  refunds from the admin panel
+- Over-refund protection as an atomic conditional `UPDATE`, and settlement by
+  webhook with signature verification ([ADR 0016](docs/adr/0016-refunds-claim-then-refund.md))
+
+**Notifications**
+
+- In-app notifications, email, and web push, from one event per occurrence
+- The event and the notification are written in **one transaction** and
+  published by a separate relay, so a crash between the two leaves work visibly
+  unfinished rather than silently lost
+  ([ADR 0024](docs/adr/0024-outbox-not-dual-writes.md))
+- Kafka fans one event out to per-channel consumer groups, keyed by `userId` so
+  a person's notifications keep their order
+  ([ADR 0025](docs/adr/0025-kafka-topics-and-partitioning.md))
+- A delivery ledger claimed before the provider is called, so a redelivery —
+  ordinary under Kafka — is not a second email
+  ([ADR 0026](docs/adr/0026-delivery-idempotency.md))
+- Per-type, per-channel preferences and one-click unsubscribe
+  ([ADR 0027](docs/adr/0027-notification-consent-and-preferences.md))
+- SMS to **verified numbers only** — a hashed, expiring, attempt-capped code
+  proves the phone before anything is sent to it, and `Address.phone` is never
+  reused because it is frequently a third party's number
+  ([ADR 0028](docs/adr/0028-sms-provider-twilio-behind-a-seam.md))
+- A per-user daily SMS cap and a quiet-hours window — circuit breakers against
+  bugs, not preferences, both recording a reason rather than dropping silently
+- Quiet hours **defer rather than drop**: a message caught at 3am is parked on
+  the ledger and sent by a sweeper when the window opens, once, by exactly one
+  replica
+- **A delivery log in the admin panel** — search by email address and see which
+  channels reached someone, and *why* one did not. "Did the buyer get the refund
+  email?" is a real support question that previously needed a database console
+- **Consumer lag at `/health/lag`** — per group, per topic including every retry
+  rung, plus dead-letter depth. 503 when it is behind, because a monitor should
+  not have to parse a body. It does not alert; there is no alerting stack here
+  and pretending otherwise would be worse than the gap
+- A stale-delivery sweeper for the one window the ledger cannot close on its
+  own: a consumer killed *between* claiming a delivery and settling it. Email
+  and push are resent, **SMS never is** — a duplicate text costs money and reads
+  like a phishing retry ([ADR 0026](docs/adr/0026-delivery-idempotency.md))
+- Retention for `outbox_events`, which grew without bound until now
+- Transient failures climb a 5s → 1m → 15m retry ladder of delay topics and
+  land in a DLQ; permanent ones never retry
+- **Runs with no broker by default.** `NOTIFY_TRANSPORT=inline` hands events
+  straight to the same consumer functions in-process, so CI and fork pull
+  requests need no Kafka
+
+**Talking to sellers, and choosing what the homepage shows**
+
+- Seller ↔ moderator message threads — the first two-way surface in the
+  application. One side is a seller, the other is the **role**: no admin user id
+  sits on a thread, because moderation is a shift rather than an assignment
+  ([ADR 0033](docs/adr/0033-seller-admin-messaging.md))
+- Sellers can ask for a homepage slot and negotiate the terms in that thread —
+  counter, accept, decline, withdraw
+- Two typed slots. Only one placement can be live per slot, enforced by a
+  **partial unique index** rather than a check, so two moderators activating at
+  once produce one hero and the loser is told the slot is taken
+  ([ADR 0034](docs/adr/0034-paid-homepage-placement.md))
+- **Paid placements are labelled "Promoted"** on the banner, on the card and in
+  the row heading. Undisclosed paid placement dressed as editorial selection is
+  deceptive advertising, so the disclosure is served by the API rather than left
+  to the client
+- Paid slots cannot enter the *derived* shelves — Price Drops and Best Rated
+  stay earned, because a card placed among them looks exactly like one that
+  qualified
+- A sixth sweeper starts a placement when its window opens and ends it when the
+  window closes, with nobody pressing anything
+
+**Operations**
+
+- Admin dashboard — metrics, orders, customers, catalogue, reports, audit log
+- Admin granted only by CLI, with no promotion endpoint anywhere in the API,
+  behind TOTP step-up on a separate short-lived session
+  ([ADR 0015](docs/adr/0015-admin-by-cli-grant-and-step-up.md))
+- Moderation with an append-only audit trail
+- Redis-backed rate limiting that holds across instances, and read-through
+  caching for the catalogue ([ADR 0018](docs/adr/0018-redis-for-shared-ephemeral-state.md))
+
+## Not built yet
+
+- **Collecting a placement fee.** The platform can negotiate one, agree it, and
+  record it; it cannot charge it. Money moves in exactly two directions here —
+  buyer to platform and platform to seller — and a third would need its own
+  claim-then-charge guard, idempotency key, invoice, tax treatment and a refund
+  path for placement paid for and not delivered. Settlement happens outside the
+  application, and [ADR 0034](docs/adr/0034-paid-homepage-placement.md) records
+  why that line was drawn rather than crossed. It is the largest gap this
+  feature ships with.
+
+- **Buyer ↔ seller messaging.** Sellers can talk to the platform, not to their
+  buyers. The table is the easy part; abuse reporting, blocking and
+  contact-detail scrubbing are the real cost — a marketplace whose members can
+  swap phone numbers has invented a way to take the transaction off-platform,
+  which means outside the refund and return guarantees the rest of this
+  repository exists to provide
+  ([ADR 0033](docs/adr/0033-seller-admin-messaging.md)).
+
+- **Stripe Connect against the real thing.** The payout path is complete and
+  exercised end to end, but only against `PAYOUT_PROVIDER=stub`. No connected
+  account has ever been created and no transfer has ever been issued, so the
+  numbers below prove the *claim ordering* rather than the provider integration.
+  Two questions in [plan 0002](docs/plans/0002-seller-payouts.md) are business
+  decisions still open: who absorbs Connect's per-transfer and per-account fees
+  on a platform taking no cut, and whether seven days is the right hold.
+
+- **Backups are still not scheduled, in either deployment.** WAL archiving and
+  point-in-time recovery work and the restore is rehearsed
+  ([ADR 0020](docs/adr/0020-replication-and-backups.md)), but base backups are
+  taken on demand and nothing expires the old ones. CloudNativePG does all
+  three in one `barmanObjectStore` block — and
+  [`k8s/base/postgres-cluster.yaml`](k8s/base/postgres-cluster.yaml) leaves it
+  out, because it needs a bucket and credentials no overlay here has. So the
+  mechanism has a home and nothing uses it.
+
+  *The payout half of this used to be here and is now closed:*
+  `payouts:pending` is a CronJob under Kubernetes, and runnable by hand under
+  Compose with `node dist/jobs.js payouts:pending`.
+
+  **The recovery sweepers, by contrast, already run** — reservations, in-flight
+  orders, quiet-hours deliveries, stale deliveries, outbox retention and
+  homepage placements all start with the API
+  ([`src/index.ts`](backend/src/index.ts)). That is not a
+  contradiction of the line above: each claims its work with a conditional
+  `UPDATE`, so N replicas divide it rather than doing it N times. Recovering
+  state nothing in the request path can reach is a different job from moving
+  money on a timer.
+
+  **The payout half is closed under Kubernetes**, where `payouts:pending` is a
+  CronJob ([ADR 0032](docs/adr/0032-kubernetes-manifests.md)) — the one
+  scheduled job in the system, and scheduled precisely because it calls a
+  payment provider. Backups are still unscheduled in both deployments.
+
+- **A real cluster.** [The manifests exist](k8s/) and are verified on kind —
+  failover promoted a replica with committed data intact and zero API restarts
+  ([ADR 0032](docs/adr/0032-kubernetes-manifests.md)). What has not happened is
+  a cloud: a manifest that applies on kind can still be wrong about a load
+  balancer, an ingress class or a storage class, and the messaging overlay
+  (Kafka, relay, worker) is not written at all.
+
+Placeholder screens say so explicitly rather than presenting controls that
+don't work.

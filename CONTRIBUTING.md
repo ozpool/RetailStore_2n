@@ -195,3 +195,15 @@ anything. `Scope.ownListing()` exists so the seller side can be driven properly.
 Adding a suite means registering it in `tests/run.ts`. CI runs the whole thing
 on every push and pull request.
 
+## Security
+
+Don't open a public issue for a vulnerability — see [SECURITY.md](SECURITY.md).
+
+Three invariants worth guarding when touching adjacent code:
+
+1. Identity documents are never persisted, logged, or returned
+   ([ADR 0006](docs/adr/0006-kyc-store-reference-not-document.md)).
+2. Uploads are re-encoded, never stored as received
+   ([ADR 0010](docs/adr/0010-strip-image-metadata.md)).
+3. Refresh tokens are stored hashed, and reuse revokes the family
+   ([ADR 0001](docs/adr/0001-access-and-refresh-tokens.md)).

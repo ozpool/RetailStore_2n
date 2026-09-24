@@ -50,6 +50,56 @@ Get-CimInstance Win32_Process |
 
 Kill the top of the tree (the `npm` process), not just the leaf.
 
+## Signed commits
+
+New commits are signed with SSH, so authorship is verifiable rather than
+self-declared — Git's `author` field is plain text that anyone can set. History
+from before signing was introduced is unsigned and stays that way; rewriting it
+would destroy the timestamps that establish authorship in the first place.
+
+Requires Git 2.34+ (`git --version`).
+
+```bash
+# A key dedicated to signing, separate from any authentication key.
+# Omit -N "" to be prompted for a passphrase instead of having none.
+ssh-keygen -t ed25519 -C "you@example.com (signing)" -f ~/.ssh/id_ed25519_signing
+
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519_signing.pub
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+```
+
+Then add the **public** key (`~/.ssh/id_ed25519_signing.pub`) to GitHub under
+*Settings → SSH and GPG keys* → **New SSH key**, setting **Key type** to
+**Signing Key** — it defaults to *Authentication Key*, and choosing wrong means
+GitHub finds no signing key and every commit silently reads `Unverified`.
+Enable **Vigilant mode** on the same page so unsigned commits are flagged
+rather than shown without a badge.
+
+For GitHub to show `Verified`, the commit's email must also be a verified
+address on the account holding the key.
+
+### Verifying locally
+
+Git needs to be told which keys it should trust, or it can confirm a signature
+is valid but not who it belongs to:
+
+```bash
+# Map your email to your public key, then point Git at that file.
+printf '%s %s\n' "you@example.com" \
+  "$(awk '{print $1" "$2}' ~/.ssh/id_ed25519_signing.pub)" >> ~/.ssh/allowed_signers
+git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
+
+git log --show-signature -1
+```
+
+Expected: `Good "git" signature for you@example.com with ED25519 key SHA256:…`
+
+Skip the `allowed_signers` step and the same command reports `Unable to open
+allowed keys file` alongside the signature — confusing, but harmless, and it
+says nothing about whether GitHub will verify the commit.
+
 ## Conventions
 
 **Validate at the boundary.** Zod parses request bodies and query strings in the
@@ -145,3 +195,15 @@ anything. `Scope.ownListing()` exists so the seller side can be driven properly.
 Adding a suite means registering it in `tests/run.ts`. CI runs the whole thing
 on every push and pull request.
 
+## Security
+
+Don't open a public issue for a vulnerability — see [SECURITY.md](SECURITY.md).
+
+Three invariants worth guarding when touching adjacent code:
+
+1. Identity documents are never persisted, logged, or returned
+   ([ADR 0006](docs/adr/0006-kyc-store-reference-not-document.md)).
+2. Uploads are re-encoded, never stored as received
+   ([ADR 0010](docs/adr/0010-strip-image-metadata.md)).
+3. Refresh tokens are stored hashed, and reuse revokes the family
+   ([ADR 0001](docs/adr/0001-access-and-refresh-tokens.md)).

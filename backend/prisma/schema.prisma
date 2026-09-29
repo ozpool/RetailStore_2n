@@ -86,6 +86,10 @@ enum NotificationType {
   LISTING_REMOVED
   ACCOUNT_SUSPENDED
   REPORT_RESOLVED
+  /// Seller or moderator: the other side replied on a thread (ADR 0033).
+  MESSAGE_RECEIVED
+  /// Seller: their homepage placement request was answered (ADR 0034).
+  PLACEMENT_DECIDED
 }
 
 /// Who someone is on the platform.
@@ -929,6 +933,8 @@ model SellerProfile {
   listings    Listing[]
   kycAttempts KycAttempt[]
   sales       OrderItem[]
+  threads     MessageThread[]
+  placements  PlacementRequest[]
 
   @@map("seller_profiles")
 }
@@ -1014,6 +1020,7 @@ model Listing {
   reservations Reservation[]
   orderItems   OrderItem[]
   wishlistedBy WishlistItem[]
+  placements   PlacementRequest[]
 
   @@index([categoryId])
   @@index([sellerId])
@@ -1343,4 +1350,134 @@ model ReturnRequest {
   @@index([status, createdAt])
   @@index([orderId])
   @@map("return_requests")
+}
+
+/// Where a paid placement can appear. Typed, because the two slots are worth
+/// different amounts and because a type lets the live-slot claim be expressed
+/// as a constraint rather than as application logic (ADR 0034).
+enum PlacementSlot {
+  /// One at a time: the banner at the top of the homepage.
+  HERO
+  /// Four positions on the "Picked for you" shelf.
+  PICKED_SHELF
+}
+
+/// A placement is a negotiation before it is a booking, so most of these states
+/// describe whose turn it is rather than where the listing appears.
+enum PlacementStatus {
+  REQUESTED /// The seller asked. Nobody has answered.
+  COUNTERED /// A moderator proposed different terms. Back with the seller.
+  AGREED    /// Both sides agreed. Not on the homepage yet.
+  LIVE      /// On the homepage now. Claimed — see `placement_live_slot`.
+  ENDED     /// The agreed period ran out. Terminal.
+  DECLINED  /// A moderator said no. Terminal.
+  WITHDRAWN /// The seller pulled the request. Terminal.
+}
+
+enum ThreadKind {
+  /// Carries a PlacementRequest negotiation.
+  PLACEMENT
+  /// Anything else a seller wants to raise.
+  SUPPORT
+}
+
+enum MessageAuthor {
+  SELLER
+  /// The moderator ROLE, not a particular person. ADR 0033 explains why the
+  /// admin side of a thread is not a user id.
+  ADMIN
+}
+
+/// A conversation between one seller and whichever moderator is reading.
+model MessageThread {
+  id       String        @id @default(uuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  kind    ThreadKind
+  subject String
+
+  /// Denormalised so the thread list sorts by activity without touching
+  /// `messages`. Written in the same transaction as the message it describes.
+  lastMessageAt DateTime  @default(now())
+  closedAt      DateTime?
+
+  /// Two counters rather than a row per message per reader: there are exactly
+  /// two sides and one of them is a role, so "has the admin side read this" is
+  /// one fact. The cost — two moderators cannot be told apart — is accepted and
+  /// recorded in ADR 0033.
+  sellerUnread Int @default(0)
+  adminUnread  Int @default(0)
+
+  messages  Message[]
+  placement PlacementRequest?
+
+  createdAt DateTime @default(now())
+
+  @@index([sellerId, lastMessageAt])
+  /// The moderator queue: threads with something unanswered, oldest first.
+  @@index([adminUnread, lastMessageAt])
+  @@map("message_threads")
+}
+
+model Message {
+  id       String        @id @default(uuid())
+  threadId String
+  thread   MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  author MessageAuthor
+
+  /// NOT a foreign key, deliberately. "An admin who has since been deleted
+  /// wrote this" has to stay a true and answerable statement — the same
+  /// decision, for the same reason, as notification_deliveries (ADR 0026).
+  authorUserId String?
+
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([threadId, createdAt])
+  @@map("messages")
+}
+
+/// A seller asking to appear on the homepage, and the answer.
+///
+/// NO MONEY MOVES HERE. `agreedCents` is what both sides settled on, not
+/// something the platform can collect: there is no seller-to-platform charge in
+/// this application and ADR 0034 records why that boundary was drawn.
+model PlacementRequest {
+  id        String        @id @default(uuid())
+  listingId String
+  listing   Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  sellerId  String
+  seller    SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  slot PlacementSlot
+  /// 0 for HERO, 0-3 for the shelf. Half of the live-slot claim.
+  position Int @default(0)
+
+  /// Whole cents, like every other amount in this schema (ADR 0005).
+  offeredCents Int
+  agreedCents  Int?
+
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  status PlacementStatus @default(REQUESTED)
+
+  /// No FK, same reasoning as Message.authorUserId.
+  decidedById String?
+  decidedAt   DateTime?
+
+  /// The conversation the negotiation happened in. One thread per request, so
+  /// the counter-offers and the record of what was agreed cannot drift apart.
+  threadId String        @unique
+  thread   MessageThread @relation(fields: [threadId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// What the homepage reads, and what the moderator queue reads.
+  @@index([status, slot, position])
+  @@index([sellerId, status])
+  @@map("placement_requests")
 }

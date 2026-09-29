@@ -6,9 +6,11 @@ import { UPLOAD_DIR, assertStorage, storageDriver } from "./lib/storage";
 import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { sellerRouter } from "./routes/seller";
+import { sellerMessagingRouter } from "./routes/sellerMessaging";
 import { profileRouter } from "./routes/profile";
 import { startDeferredSweeper } from "./lib/deferredDeliveries";
 import { startOutboxRetentionSweeper } from "./lib/outboxRetention";
+import { startPlacementSweeper } from "./lib/placement";
 import { startStalePendingSweeper } from "./lib/stalePending";
 import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
@@ -125,6 +127,7 @@ app.use("/admin", adminRouter);
 app.use("/seller", sellerPayoutsRouter);
 app.use("/seller", sellerVerificationRouter);
 app.use("/seller", salesRouter);
+app.use("/seller", sellerMessagingRouter);
 app.use("/seller", sellerRouter);
 
 /**
@@ -235,6 +238,18 @@ app.listen(PORT, () => {
    */
   startStalePendingSweeper();
   startOutboxRetentionSweeper();
+
+  /**
+   * And a sixth: a placement whose start date has arrived, and one whose end
+   * date has passed.
+   *
+   * Same test as the other five — nothing in the request path will ever reach
+   * it. A seller who agreed to a window starting Monday is not going to be
+   * served by a moderator remembering to press a button, and a placement whose
+   * week is over must stop being on the homepage whether anybody is looking or
+   * not. See docs/adr/0034-paid-homepage-placement.md
+   */
+  startPlacementSweeper();
 
   /**
    * The outbox relay, but ONLY on the inline transport.

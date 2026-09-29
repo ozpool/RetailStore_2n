@@ -33,6 +33,10 @@ const SUITES: Suite[] = [
   { name: "payouts", file: "api/payouts.ts", kind: "api" },
   { name: "payout-routes", file: "api/payout-routes.ts", kind: "api" },
   { name: "returns", file: "api/returns.ts", kind: "api" },
+  { name: "messaging", file: "api/messaging.ts", kind: "api" },
+  { name: "placement", file: "api/placement.ts", kind: "api" },
+  { name: "placement-routes", file: "api/placement-routes.ts", kind: "api" },
+  { name: "promoted-homepage", file: "api/promoted-homepage.ts", kind: "api" },
   { name: "return-routes", file: "api/return-routes.ts", kind: "api" },
   { name: "wishlist", file: "api/wishlist.ts", kind: "api" },
   { name: "reviews", file: "api/reviews.ts", kind: "api" },
@@ -49,6 +53,20 @@ const SUITES: Suite[] = [
   { name: "admin", file: "api/admin.ts", kind: "api" },
   { name: "identity", file: "api/identity.ts", kind: "api" },
   { name: "identity-stale", file: "api/identity-stale-session.ts", kind: "api" },
+  // Waits ~60s for the reconciliation sweeper.
+  { name: "payment-safety", file: "payment-safety.ts", kind: "api", slow: true },
+
+  { name: "browser-catalog", file: "browser/catalog.ts", kind: "browser" },
+  { name: "browser-checkout", file: "browser/checkout.ts", kind: "browser" },
+  { name: "browser-fulfilment", file: "browser/fulfilment.ts", kind: "browser" },
+  { name: "browser-admin", file: "browser/admin-and-notifications.ts", kind: "browser" },
+  { name: "browser-dashboard", file: "browser/admin-dashboard.ts", kind: "browser" },
+  { name: "browser-placement", file: "browser/placement.ts", kind: "browser" },
+  { name: "browser-wishlist", file: "browser/wishlist.ts", kind: "browser" },
+  { name: "browser-reviews", file: "browser/reviews.ts", kind: "browser" },
+  { name: "browser-identity", file: "browser/identity.ts", kind: "browser" },
+  // Waits ~30s for a hold to expire on its own.
+  { name: "browser-cart-badge", file: "browser/cart-badge.ts", kind: "browser", slow: true },
 ];
 
 function runOne(suite: Suite): Promise<{ code: number; passed: number; failed: number }> {

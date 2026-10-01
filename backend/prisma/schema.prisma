@@ -306,6 +306,7 @@ model User {
   reportsMade       Report[]                 @relation("ReportsMade")
   moderationActions ModerationAction[]       @relation("ModeratorActions")
   returnsRequested  ReturnRequest[]          @relation("ReturnBuyer")
+  idempotencyKeys   IdempotencyKey[]
 
   @@index([role])
   @@map("users")
@@ -1480,4 +1481,48 @@ model PlacementRequest {
   @@index([status, slot, position])
   @@index([sellerId, status])
   @@map("placement_requests")
+}
+
+/// Where one client-supplied Idempotency-Key is in its life.
+/// IN_PROGRESS is a claim on running the handler; COMPLETED holds the answer.
+/// See docs/adr/0035-idempotency-keys-at-the-api-boundary.md
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+/// One Idempotency-Key, claimed BEFORE the route handler runs.
+///
+/// The unique (userId, key) pair is the guard: the INSERT that wins it is the
+/// request that runs, and every later request with the same key is answered
+/// from this row. Scoped to the user so one account can never be handed
+/// another's stored response. Deleted with the user, and swept after 24 hours.
+model IdempotencyKey {
+  id     String            @id @default(uuid())
+  userId String
+  user   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key    String
+  status IdempotencyStatus @default(IN_PROGRESS)
+
+  /// The request the key is bound to. A key reused for a different method,
+  /// path or body is refused rather than answered with this row's response.
+  method      String
+  path        String
+  /// SHA-256 of method, path and the canonical (key-sorted) JSON body.
+  requestHash String
+
+  /// The answer, written before it is sent. Null until COMPLETED.
+  responseStatus Int?
+  responseBody   Json?
+
+  /// While IN_PROGRESS, the claim cannot be taken over before this. Covers a
+  /// process that died mid-request; a live handler finishes long before it.
+  lockedUntil DateTime
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([userId, key])
+  /// What the retention sweeper scans.
+  @@index([createdAt])
+  @@map("idempotency_keys")
 }

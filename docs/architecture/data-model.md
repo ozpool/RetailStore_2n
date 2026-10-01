@@ -390,6 +390,36 @@ listing is deleted.
 
 **`refundId` is unique** so one request can never be credited twice.
 
+### `idempotency_keys`
+
+One client-supplied `Idempotency-Key`, claimed **before** the route handler
+runs, so a retried request gets the first answer back instead of running again.
+→ [ADR 0035](../adr/0035-idempotency-keys-at-the-api-boundary.md)
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `userId` | uuid | FK → users, cascade. **Unique with `key`** |
+| `key` | text | The header value, as the client sent it |
+| `status` | enum | `IN_PROGRESS` → `COMPLETED` |
+| `method` / `path` | text | The request the key is bound to, path with ids filled in |
+| `requestHash` | text | SHA-256 of method, path and the key-sorted JSON body |
+| `responseStatus` | int? | Set on `COMPLETED` |
+| `responseBody` | jsonb? | Set on `COMPLETED`; replayed verbatim |
+| `lockedUntil` | timestamp | An `IN_PROGRESS` claim older than this may be taken over |
+| `completedAt` | timestamp? | |
+
+**`(userId, key)` is unique, and that index is the whole safety.** Two copies of
+one request race on the `INSERT`, and the loser is answered from the winner's
+row instead of running the handler. Scoped to the user, not global, so one
+account can never be handed another's stored response.
+
+**The answer is written before it is sent.** A client that has received a
+response can never retry into an `IN_PROGRESS` row for that same request.
+
+**Rows live 24 hours**, then the retention sweeper deletes them, and a key that
+old is treated as never used. A replay layer, not a ledger: the real
+double-execution guards stay where they were.
+
 ## Enums
 
 | Enum | Values |
@@ -402,6 +432,7 @@ listing is deleted.
 | `FulfilmentStatus` | `UNFULFILLED`, `SHIPPED`, `DELIVERED`, `UNFULFILLABLE` |
 | `PayoutStatus` | `PENDING`, `PAID`, `FAILED` |
 | `ReturnStatus` | `OPEN`, `APPROVED`, `REFUSED`, `ESCALATED`, `REJECTED`, `WITHDRAWN` |
+| `IdempotencyStatus` | `IN_PROGRESS`, `COMPLETED` |
 
 `OrderStatus` and `FulfilmentStatus` are deliberately separate. Payment and
 delivery are independent facts — an order is `PAID` *and* `UNFULFILLED` for as
@@ -513,6 +544,7 @@ Enforced in the application layer unless noted:
 | `defer_sms_in_quiet_hours` | `DeliveryStatus.DEFERRED`, `notification_deliveries.notBefore` and its index |
 | `add_seller_payouts` | `payouts`, `payout_items`, `payout_debts`, `PayoutStatus`, and the four `seller_profiles` payout columns |
 | `add_buyer_returns` | `return_requests`, `ReturnStatus`, and `RefundTrigger.BUYER_RETURN` |
+| `add_idempotency_keys` | `idempotency_keys`, `IdempotencyStatus` |
 
 ### `outbox_events`
 

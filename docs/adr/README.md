@@ -51,6 +51,7 @@ the old one, rather than an edit.
 | [0032](0032-kubernetes-manifests.md) | Kubernetes: an operator for Postgres, plain manifests for everything else | Accepted |
 | [0033](0033-seller-admin-messaging.md) | Seller–admin messaging, as threads with a role on one side | Accepted |
 | [0034](0034-paid-homepage-placement.md) | Paid homepage placement, recorded as an agreement and labelled as an ad | Accepted |
+| [0035](0035-idempotency-keys-at-the-api-boundary.md) | Idempotency keys at the API boundary, claimed before the handler runs | Proposed |
 
 > **All thirty-two are implemented.** 0024 and 0025 landed with phase 1 of
 > [plan 0001](../plans/0001-multi-channel-notifications.md), 0026 and 0027 with

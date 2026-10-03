@@ -9,6 +9,7 @@ import {
 } from "../lib/reservations";
 import { cartSummary } from "../lib/cart";
 import { requireAuth } from "../middleware/requireAuth";
+import { idempotent } from "../middleware/idempotent";
 
 export const reservationsRouter = Router();
 
@@ -63,7 +64,8 @@ reservationsRouter.get("/", async (req, res) => {
   }
 });
 
-reservationsRouter.post("/", async (req, res) => {
+// A retried hold must return the first hold, not take a second unit of stock.
+reservationsRouter.post("/", idempotent, async (req, res) => {
   try {
     const parsed = createBody.safeParse(req.body);
     if (!parsed.success) {

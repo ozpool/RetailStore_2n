@@ -32,6 +32,7 @@ import {
 } from "../lib/returns";
 import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middleware/requireAuth";
+import { idempotent } from "../middleware/idempotent";
 import { OrderStatus } from "../generated/prisma/enums";
 
 export const ordersRouter = Router();
@@ -241,7 +242,7 @@ const RETURN_REFUSALS: Record<string, { code: string; error: string }> = {
   "no-such-item": { code: "NOT_FOUND", error: "No such item." },
 };
 
-ordersRouter.post("/items/:itemId/return", async (req, res) => {
+ordersRouter.post("/items/:itemId/return", idempotent, async (req, res) => {
   try {
     const parsed = returnSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -357,7 +358,12 @@ const checkoutBody = z.object({
   addressId: z.string().uuid().optional(),
 });
 
-ordersRouter.post("/", async (req, res) => {
+/**
+ * Keyed because a retry here cannot recover on its own: the first request
+ * already turned the holds into an order, so a second finds nothing to check
+ * out — and the client never learned the id of the order it created.
+ */
+ordersRouter.post("/", idempotent, async (req, res) => {
   try {
     const parsed = checkoutBody.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -424,8 +430,12 @@ const payBody = z.object({
  * webhook below is the source of truth. Confirming here as well is what makes
  * sandbox testing possible without a browser, and it is scoped to the order's
  * owner.
+ *
+ * The Idempotency-Key does not replace any of that — the claim in step 2 is
+ * still what stops a second charge. What the key adds is that a retry is told
+ * how its own first attempt went, instead of a bare ALREADY_PAID. ADR 0035.
  */
-ordersRouter.post("/:id/pay", async (req, res) => {
+ordersRouter.post("/:id/pay", idempotent, async (req, res) => {
   let claimed: string | null = null;
   try {
     const parsed = payBody.safeParse(req.body);

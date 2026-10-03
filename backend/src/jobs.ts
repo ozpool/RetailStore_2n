@@ -6,6 +6,7 @@ import { sweepDeferredOnce } from "./lib/deferredDeliveries";
 import { sweepStalePendingOnce } from "./lib/stalePending";
 import { releaseExpiredHolds } from "./lib/reservations";
 import { reconcileProcessingOrders } from "./lib/orders";
+import { pruneIdempotencyKeysOnce } from "./lib/idempotency";
 
 /**
  * One-shot jobs, for a scheduler that is not this process.
@@ -101,6 +102,11 @@ const JOBS: Record<string, Job> = {
     scheduled: false,
     what: "settle in-flight payments against the provider",
     run: async () => `settled=${await reconcileProcessingOrders()}`,
+  },
+  "idempotency:prune": {
+    scheduled: false,
+    what: "delete idempotency keys past the 24-hour retention",
+    run: async () => `deleted=${(await pruneIdempotencyKeysOnce()).deleted}`,
   },
 };
 

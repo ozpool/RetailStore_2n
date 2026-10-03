@@ -11,6 +11,7 @@ import { profileRouter } from "./routes/profile";
 import { startDeferredSweeper } from "./lib/deferredDeliveries";
 import { startOutboxRetentionSweeper } from "./lib/outboxRetention";
 import { startPlacementSweeper } from "./lib/placement";
+import { startIdempotencySweeper } from "./lib/idempotency";
 import { startStalePendingSweeper } from "./lib/stalePending";
 import { startOrderSweeper } from "./lib/orders";
 import { assertKycConfigured } from "./lib/kycProvider";
@@ -250,6 +251,16 @@ app.listen(PORT, () => {
    * not. See docs/adr/0034-paid-homepage-placement.md
    */
   startPlacementSweeper();
+
+  /**
+   * And a seventh, for a table rather than a promise owed to anybody.
+   *
+   * Idempotency keys are honoured for 24 hours and then mean nothing, but
+   * nothing in the request path deletes them — a key is only ever read by a
+   * retry of its own request. Without this, `idempotency_keys` grows by one row
+   * per keyed request, forever. See docs/adr/0035-idempotency-keys-at-the-api-boundary.md
+   */
+  startIdempotencySweeper();
 
   /**
    * The outbox relay, but ONLY on the inline transport.

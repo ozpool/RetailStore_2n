@@ -31,13 +31,32 @@ against that input. `code` is stable; `error` text is not.
 | 401 | No or expired session |
 | 403 | Authenticated but not permitted (`NOT_A_SELLER`, `PAYOUTS_LOCKED`) |
 | 404 | Not found — **also returned for records owned by someone else** |
-| 409 | Conflict with current state (`ALREADY_VERIFIED`, `SESSION_CLOSED`) |
+| 409 | Conflict with current state (`ALREADY_VERIFIED`, `SESSION_CLOSED`, `IDEMPOTENCY_IN_PROGRESS`) |
+| 422 | An `Idempotency-Key` reused for a different request (`IDEMPOTENCY_KEY_REUSED`) |
 | 429 | Rate limited; includes `retryAfterSeconds` |
 | 500 | Server error; details are logged, not returned |
 
 **Money** is integer minor units (`priceCents`) in bodies. The one exception is
 `/catalog/listings`, whose `minPrice`/`maxPrice` are whole currency units
 because that is what a price filter collects.
+
+**Idempotency.** Endpoints marked 🔁 accept an optional `Idempotency-Key`
+header — any 1–255 printable characters with no spaces; a UUID is ideal. The
+first request with a key runs; a retry with the same key gets the first
+request's status and body back with `Idempotent-Replayed: true`, instead of
+running again. Keys are scoped to the signed-in user and honoured for 24 hours.
+→ [ADR 0035](adr/0035-idempotency-keys-at-the-api-boundary.md)
+
+| Situation | Answer |
+| --- | --- |
+| Same key, same request, finished | The stored answer, replayed — including a 4xx |
+| Same key, same request, still running | `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After` |
+| Same key, different method, path or body | `422 IDEMPOTENCY_KEY_REUSED` |
+| Malformed key | `400 INVALID_IDEMPOTENCY_KEY` |
+| First request failed with a 5xx or a 429 | Not stored — retry with the same key |
+
+Without the header nothing changes. The BFF does not forward it yet, so today
+it is for direct API clients.
 
 ---
 
@@ -432,7 +451,7 @@ never both claim the same unique item.
 
 Your live holds, newest first, plus `holdMinutes` (currently 15).
 
-### `POST /reservations`
+### `POST /reservations` 🔁
 
 ```json
 { "listingId": "<id>", "quantity": 1 }
@@ -885,7 +904,7 @@ Exactly one default at a time, swapped inside a transaction.
 
 → [ADR 0013](adr/0013-payment-provider-seam.md)
 
-### `POST /orders`
+### `POST /orders` 🔁
 Converts live holds into an order and opens a payment intent.
 
 ```json
@@ -906,12 +925,14 @@ a basket can span several sellers, and two sellers cannot share one parcel —
 so "your order has shipped" is not something that can honestly be said about a
 whole order.
 
-### `POST /orders/:id/pay`
+### `POST /orders/:id/pay` 🔁
 ```json
 { "cardNumber": "4242424242424242" }
 ```
 Claims the order atomically before contacting the provider. Concurrent calls get
-`409 PAYMENT_IN_PROGRESS` or `409 ALREADY_PAID` — never a second charge.
+`409 PAYMENT_IN_PROGRESS` or `409 ALREADY_PAID` — never a second charge. With an
+`Idempotency-Key`, a retry of the *same* attempt is told that attempt's outcome
+instead; the claim is still what prevents the second charge.
 
 ### `GET /orders/refunds` 🔒
 
@@ -975,7 +996,7 @@ instead of offering a button that would fail.
 Somebody else's line is a **404**, not a refusal: distinguishing them turns an
 id into a way to ask what another person bought.
 
-#### `POST /orders/items/:itemId/return`
+#### `POST /orders/items/:itemId/return` 🔁
 
 ```json
 { "reason": "The rim is chipped and it wasn't in the photos.",

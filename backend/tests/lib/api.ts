@@ -9,7 +9,7 @@ import { API, WEB } from "./db";
  * failure looks like a permissions bug rather than a test bug.
  */
 
-export type Reply<T = any> = { status: number; json: T; text: string };
+export type Reply<T = any> = { status: number; json: T; text: string; headers: Headers };
 
 export class Client {
   private cookies = new Map<string, string>();
@@ -32,12 +32,19 @@ export class Client {
     }
   }
 
-  async request<T = any>(method: string, path: string, body?: unknown): Promise<Reply<T>> {
+  /** `headers` are extra request headers, e.g. an Idempotency-Key. */
+  async request<T = any>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers: Record<string, string> = {}
+  ): Promise<Reply<T>> {
     const res = await fetch(`${this.base}${path}`, {
       method,
       headers: {
         ...(this.cookies.size ? { cookie: this.header() } : {}),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -51,14 +58,14 @@ export class Client {
       // Not JSON — an HTML error page, usually. Kept so the caller can see it.
       json = { raw: text.slice(0, 300) };
     }
-    return { status: res.status, json, text };
+    return { status: res.status, json, text, headers: res.headers };
   }
 
   get<T = any>(path: string) {
     return this.request<T>("GET", path);
   }
-  post<T = any>(path: string, body?: unknown) {
-    return this.request<T>("POST", path, body);
+  post<T = any>(path: string, body?: unknown, headers?: Record<string, string>) {
+    return this.request<T>("POST", path, body, headers);
   }
   put<T = any>(path: string, body?: unknown) {
     return this.request<T>("PUT", path, body);
